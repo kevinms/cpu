@@ -1,0 +1,10 @@
+
+#
+# Build a ROM file from assembly code.
+#
+./assembler.py --assemble test.asm > test.rom
+
+#
+# Run the ROM in the CPU emulator.
+#
+./cpu-emu -r test.rom
