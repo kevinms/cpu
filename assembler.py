@@ -105,7 +105,6 @@ def parseOperand(opr, modes, line, bits):
 		if opr[0] == '\'' and opr[2] == '\'':
 			opr = str(ord(opr[1]))
 		return format(int(opr, 0), bits), modebit
-		#return format(int(opr, 0), '016b'), modebit
 
 def assemble(source):
 

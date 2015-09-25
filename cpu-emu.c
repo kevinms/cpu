@@ -75,6 +75,11 @@ int loadBinaryBlob(char *path, uint16_t offset)
 	return(0);
 }
 
+void read8bit(char *bits, uint8_t *memory)
+{
+	*(uint8_t *)memory = htons((uint8_t)strtoul(bits, NULL, 2));
+}
+
 void read16bit(char *bits, uint8_t *memory)
 {
 	*(uint16_t *)memory = htons((uint16_t)strtoul(bits, NULL, 2));
@@ -93,6 +98,23 @@ int loadROM(char *path)
 	}
 
 	returnValue = 0;
+	while (fscanf(fd, "%s", buf) != EOF) {
+		if (buf[0] == '#' || buf[0] == '\n' || buf[0] == ' ' ||
+			buf[0] == '\t' || buf[0] == '/' || buf[0] == ';')
+			continue;
+
+		int c = strlen(buf);
+		if (c == 8) {
+			read8bit(buf, mem+pc);
+			pc += 1;
+		} else if (c == 16) {
+			read16bit(buf, mem+pc);
+			pc += 2;
+		}
+	}
+
+/*
+	returnValue = 0;
 	while (fgets(buf, 512, fd) != NULL) {
 		int c;
 
@@ -102,22 +124,23 @@ int loadROM(char *path)
 
 		c = sscanf(buf, "%s %s %s %s", b[0], b[1], b[2], b[3]);
 
-		if (c != 4) {
-			fprintf(stderr, "Must have 4 bytes per line.");
+		if (c <= 0) {
+			fprintf(stderr, "Must have at least 16 bits per line.\n");
 			returnValue = -1;
 			break;
 		}
 
-		//fprintf(stderr, "%d: %s, %s, %s, %s\n", c, b[0], b[1], b[2], b[3]);
+		int i;
+		for (i = 0; i < c; i++) {
+			read16bit(b[i], mem+pc); pc += 2;
+		}
 
-		read16bit(b[0], mem+pc); pc += 2;
-		read16bit(b[1], mem+pc); pc += 2;
-		read16bit(b[2], mem+pc); pc += 2;
-		read16bit(b[3], mem+pc); pc += 2;
+		//fprintf(stderr, "%d: %s, %s, %s, %s\n", c, b[0], b[1], b[2], b[3]);
 
 		if (feof(fd))
 			break;
 	}
+*/
 
 	pc = 0;
 	fclose(fd);
@@ -323,6 +346,8 @@ void interactive()
 	if (keepGoing != 0) {
 		return;
 	}
+
+	strcpy(savedInput, "s");
 
 	printf("#> ");
 
@@ -547,7 +572,7 @@ int main(int argc, char **argv)
 			break;
 		case ldw:
 			log("ldw r[%" PRIu16 "] = mem[%" PRIu16 "]", opr0, opr1);
-			r[opr0] = mem[opr1];
+			r[opr0] = (mem[opr1] << 8) | mem[opr1+1];
 			break;
 		case stw:
 			log("stw mem[%" PRIu16 "] = %" PRIu16, opr0, opr1);
