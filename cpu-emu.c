@@ -19,9 +19,12 @@
 	} while(0)
 
 // Registers
-// r0 to r7                 General Purpose
-// p0 to p3 ==> r8  to r12  Port Mapped I/O
-// c0 to c4 ==> r13 to r16  64bit Hardware Counter
+// r0  to r7                General Purpose
+//        r8  --> sp        Stack Pointer
+//        r9  --> bn        Bank Number
+//        r10               Unused
+// r11 to r12 --> p0 to p1  Port Mapped I/O
+// r13 to r16 --> c0 to c4  64bit Hardware Counter
 uint16_t r[16], pc, fl;
 uint8_t mem[65536];
 

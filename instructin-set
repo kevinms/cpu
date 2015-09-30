@@ -1,0 +1,34 @@
+
+    op    ord reg  dest mode free
+    ccccc o   rrrr dddd m    -
+
+nop 00000 0   0000 0000 0    0
+
+add 00001 o   rrrr dddd m    0 // dst{r}   lhs{r,c}  rhs{r,c}
+sub 00010 o   rrrr dddd m    0 // dst{r}   lhs{r,c}  rhs{r,c}
+mul 00011 o   rrrr dddd m    0 // dst{r}   lhs{r,c}  rhs{r,c}
+div 00100 o   rrrr dddd m    0 // dst{r}   lhs{r,c}  rhs{r,c}
+
+ldw 
+stw
+
+mov
+
+and
+or
+xor
+nor
+lsl
+lsr
+
+bez
+ble
+bge
+bne 0b00010011 // mmm dst{r,c} lhs{r,c}  rhs{r,c}
+neq 0b00010100 // mmm dst{r,c} lhs{r,c}  rhs{r,c}
+jmp
+
+in
+out
+
+die
