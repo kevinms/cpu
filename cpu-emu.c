@@ -552,9 +552,23 @@ int main(int argc, char **argv)
 		case add:
 			log("add r[%" PRIu16 "] = %" PRIu16 " + %" PRIu16, opr0, opr1, opr2);
 			r[opr0] = opr1 + opr2;
+			if ((UINT16_MAX - opr1) < opr2) {
+				fl |= FL_CARRY;
+			}
 			break;
 		case sub:
 			log("sub r[%" PRIu16 "] = %" PRIu16 " - %" PRIu16, opr0, opr1, opr2);
+			r[opr0] = opr1 - opr2;
+			break;
+		case adc:
+			log("adc r[%" PRIu16 "] = %" PRIu16 " + %" PRIu16, opr0, opr1, opr2);
+			r[opr0] = opr1 + opr2 + (fl & FL_CARRY);
+			if ((UINT16_MAX - opr1) < opr2) {
+				fl |= FL_CARRY;
+			}
+			break;
+		case sbc:
+			log("sbc r[%" PRIu16 "] = %" PRIu16 " - %" PRIu16, opr0, opr1, opr2);
 			r[opr0] = opr1 - opr2;
 			break;
 		case mul:
