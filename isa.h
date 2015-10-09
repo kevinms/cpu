@@ -52,14 +52,15 @@
 #define lsr  0b00010001 // -mm dst{r}   lhs{r,c}  rhs{r,c}
 
 #define bez  0b00010010 // mm- dst{r,c} lhs{r,c}
-#define ble  0b00010011 // mm- dst{r,c} lhs{r,c}
-#define bge  0b00010100 // mm- dst{r,c} lhs{r,c}
-#define bne  0b00010101 // mmm dst{r,c} lhs{r,c}  rhs{r,c}
-#define beq  0b00010110 // mmm dst{r,c} lhs{r,c}  rhs{r,c}
-#define jmp  0b00010111 // m-- dst{r,c}
+#define bnz  0b00010011 // mm- dst{r,c} lhs{r,c}
+#define ble  0b00010100 // mm- dst{r,c} lhs{r,c}
+#define bge  0b00010101 // mm- dst{r,c} lhs{r,c}
+#define bne  0b00010110 // mmm dst{r,c} lhs{r,c}  rhs{r,c}
+#define beq  0b00010111 // mmm dst{r,c} lhs{r,c}  rhs{r,c}
+#define jmp  0b00011000 // m-- dst{r,c}
 
-#define in   0b00011000 // ---
-#define out  0b00011001 // ---
+#define in   0b00011001 // ---
+#define out  0b00011010 // ---
 
 #define die  0b11111111
 // End Instruction Op Codes

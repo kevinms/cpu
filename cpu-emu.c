@@ -25,6 +25,8 @@
 //        r10               Unused
 // r11 to r12 --> p0 to p1  Port Mapped I/O
 // r13 to r16 --> c0 to c4  64bit Hardware Counter
+
+#define FL_CARRY 0x1
 uint16_t r[16], pc, fl;
 uint8_t mem[65536];
 
@@ -36,6 +38,14 @@ uint64_t	maxCycles = UINT64_MAX;
 char		*romFile = NULL;
 char		*blobFile = NULL;
 uint16_t	blobOffset = 0x400;
+
+
+struct instruction {
+	uint8_t op;
+	uint16_t opr0, opr1, opr2;
+	uint16_t raw0, raw1, raw2;
+	int m0, m1, m2;
+};
 
 void initEnvironment()
 {
@@ -80,7 +90,7 @@ int loadBinaryBlob(char *path, uint16_t offset)
 
 void read8bit(char *bits, uint8_t *memory)
 {
-	*(uint8_t *)memory = htons((uint8_t)strtoul(bits, NULL, 2));
+	*(uint8_t *)memory = (uint8_t)strtoul(bits, NULL, 2);
 }
 
 void read16bit(char *bits, uint8_t *memory)
@@ -92,7 +102,6 @@ int loadROM(char *path)
 {
 	FILE	*fd;
 	char	buf[512];
-	char	b[4][512];
 	int		returnValue;
 
 	if ((fd = fopen(path, "r")) == NULL) {
@@ -116,39 +125,27 @@ int loadROM(char *path)
 		}
 	}
 
-/*
-	returnValue = 0;
-	while (fgets(buf, 512, fd) != NULL) {
-		int c;
-
-		if (buf[0] == '#' || buf[0] == '\n' || buf[0] == ' ' ||
-			buf[0] == '\t' || buf[0] == '/' || buf[0] == ';')
-			continue;
-
-		c = sscanf(buf, "%s %s %s %s", b[0], b[1], b[2], b[3]);
-
-		if (c <= 0) {
-			fprintf(stderr, "Must have at least 16 bits per line.\n");
-			returnValue = -1;
-			break;
-		}
-
-		int i;
-		for (i = 0; i < c; i++) {
-			read16bit(b[i], mem+pc); pc += 2;
-		}
-
-		//fprintf(stderr, "%d: %s, %s, %s, %s\n", c, b[0], b[1], b[2], b[3]);
-
-		if (feof(fd))
-			break;
-	}
-*/
-
 	pc = 0;
 	fclose(fd);
 	return(returnValue);
 }
+
+uint16_t
+fetchInst(uint16_t lpc, struct instruction *o)
+{
+	uint8_t *i = mem + lpc;
+
+	o->op = i[0];
+
+	o->raw0 = (i[2] << 8) | i[3]; o->opr0 = o->raw0; o->m0 = 0;
+	o->raw1 = (i[4] << 8) | i[5]; o->opr1 = o->raw1; o->m1 = 0;
+	o->raw2 = (i[6] << 8) | i[7]; o->opr2 = o->raw2; o->m2 = 0;
+	if (i[1] & MODE_BITA) { o->opr0 = r[o->opr0]; o->m0 = 1; }
+	if (i[1] & MODE_BITB) { o->opr1 = r[o->opr1]; o->m1 = 1; }
+	if (i[1] & MODE_BITC) { o->opr2 = r[o->opr2]; o->m2 = 1; }
+
+	return(lpc + 8);
+} 
 
 void dumpMemory(int width)
 {
@@ -217,10 +214,13 @@ void dumpRegisters(int printHeader, uint16_t nextPC, char *message)
 #define BP_MEM_RD 2
 #define BP_MEM_WR 3
 #define BP_MEM_RDWR 4
+#define BP_FINISH 5
 
 struct breakpoint {
 	int type;
 	uint64_t condition;
+	uint64_t maxHits;
+	uint64_t id;
 	struct breakpoint *next;
 };
 
@@ -230,9 +230,14 @@ struct bptype {
 };
 
 struct breakpoint *bp_list;
+uint64_t bp_list_count;
 struct bptype bp_table[] = {
-	{BP_PC, "pc"}, {BP_IC, "ic"}, {BP_MEM_RD, "rd"},
-	{BP_MEM_WR, "wr"}, {BP_MEM_RDWR, "rdwr"}
+	{BP_PC, "pc"},
+	{BP_IC, "ic"},
+	{BP_MEM_RD, "rd"},
+	{BP_MEM_WR, "wr"},
+	{BP_MEM_RDWR, "rdwr"},
+	{BP_FINISH, "fin"}
 };
 
 void deleteBreakpoint(uint64_t n)
@@ -271,7 +276,7 @@ void deleteAllBreakpoints()
 	}
 }
 
-void addBreakpoint(char *name, uint64_t condition)
+uint64_t addBreakpoint(char *name, uint64_t condition, uint64_t maxHits)
 {
 	struct breakpoint *bp;
 	int type = -1;
@@ -285,36 +290,60 @@ void addBreakpoint(char *name, uint64_t condition)
 	}
 	if (type < 0) {
 		fprintf(stderr, "Unknown breakpoint type: %d\n", type);
-		return;
+		return(UINT64_MAX);
 	}
 
 	bp = malloc(sizeof(*bp));
 
 	bp->type = type;
 	bp->condition = condition;
+	bp->maxHits = maxHits;
+	bp->id = bp_list_count;
+
+	bp_list_count++;
 	bp->next = bp_list;
 	bp_list = bp;
 
-	printf("Set breakpoint: %s == %" PRIu64 "\n", name, condition);
+	printf("Set breakpoint: %s %" PRIu64 "\n", name, condition);
+
+	return(bp->id);
 }
 
 int hitBreakpoint()
 {
+	struct breakpoint *hitBP = NULL;
 	struct breakpoint *bp;
-	int hit;
 	uint64_t i;
 
-	hit = 0;
 	for (bp = bp_list, i = 0; bp != NULL; bp = bp->next, ++i) {
-		if (bp->type == BP_PC) {
+		switch (bp->type) {
+		case BP_PC:
 			if (pc == (uint16_t)bp->condition) {
 				printf("Hit breakpoint #%" PRIu64 ": PC == 0x%" PRIX16 "\n", i, pc);
-				hit = 1;
+				hitBP = bp;
 			}
+			break;
+		case BP_FINISH: {
+			struct instruction o;
+			fetchInst(pc, &o);
+
+			if ((o.op == jmp) && (o.m0 != 0) && (o.raw0 == 6)) {
+				printf("Hit breakpoint #%" PRIu64 ": jmp r8\n", i);
+				hitBP = bp;
+			}
+			break;
+		}
 		}
 	}
 
-	return(hit);
+	if (hitBP != NULL && hitBP->maxHits != UINT64_MAX) {
+		hitBP->maxHits--;
+		if (hitBP->maxHits == 0) {
+			deleteBreakpoint(hitBP->id);
+		}
+	}
+
+	return(hitBP != NULL);
 }
 
 void listBreakpoints()
@@ -382,11 +411,16 @@ void interactive()
 		if (input[0] == 'r') {
 			dumpRegisters(0, nextPC, msg);
 		}
+		if (input[0] == 'f') {
+			addBreakpoint("fin", 0, 1);
+			keepGoing = 1;
+			break;
+		}
 		if (input[0] == 'b') {
 			sscanf(input, "%s %s %s", cmd, opt1, opt2);
 			if (opt1[0] != '\0') {
 				num = strtoull(opt2, NULL, 0);
-				addBreakpoint(opt1, num);
+				addBreakpoint(opt1, num, UINT64_MAX);
 			} else {
 				listBreakpoints();
 			}
@@ -581,7 +615,7 @@ int main(int argc, char **argv)
 			break;
 		case ldb:
 			log("ldb r[%" PRIu16 "] = mem[%" PRIu16 "]", opr0, opr1);
-			r[opr0] = (mem[opr1] << 8) | mem[opr1+1];
+			r[opr0] = mem[opr1];
 			break;
 		case stb:
 			log("stb mem[%" PRIu16 "] = %" PRIu16, opr0, opr1);
@@ -629,6 +663,13 @@ int main(int argc, char **argv)
 			if (opr1 == 0) {
 				nextPC = opr0;
 				fl |= FL_Z;
+			}
+			break;
+		case bnz:
+			log("bnz %" PRIu16 " %" PRIu16 " == 0", opr0, opr1);
+			if (opr1 != 0) {
+				nextPC = opr0;
+				fl &= ~FL_Z;
 			}
 			break;
 		case ble:
