@@ -83,7 +83,7 @@ def loadLabels(source):
 def parseOperand(opr, modes, line, bits):
 	modebit = '0'
 	if opr == 'sp':
-		opr = 'r8'
+		opr = 'r15'
 	if opr[0] == '.':
 		label, plus, number = opr.partition('+')
 		if label[1:] not in labels:

@@ -11,17 +11,8 @@
 ; r1 source address
 ; r2 length
 .memcpy
-; save registers to be used
-sub sp sp 2
-stw sp r0
-sub sp sp 2
-stw sp r1
-sub sp sp 2
-stw sp r2
-sub sp sp 2
-stw sp r3
 
-._copyword
+.__copyword
 
 ; copy word from source to destination
 ldw r3 r1
@@ -31,21 +22,12 @@ sub r2 r2 2
 add r0 r0 2
 add r1 r1 2
 
-bnz ._copyword r2
-
-; restore used registers
-ldw r3 sp
-add sp sp 2
-ldw r2 sp
-add sp sp 2
-ldw r1 sp
-add sp sp 2
-ldw r0 sp
-add sp sp 2
+bnz .__copyword r2
 
 ; return to caller
-ldw r6 sp
-jmp r6
+ldw r4 sp
+add sp sp 2
+jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The length must be a multiple of the word size.
@@ -54,15 +36,8 @@ jmp r6
 ; r1 value
 ; r2 length
 .memset
-; save registers to be used
-sub sp sp 2
-stw sp r0
-sub sp sp 2
-stw sp r1
-sub sp sp 2
-stw sp r2
 
-._setword
+.__setword
 
 ; set word to given value
 stw r0 r1
@@ -70,51 +45,54 @@ stw r0 r1
 sub r2 r2 2
 add r0 r0 2
 
-bnz ._setword r2
-
-; restore used registers
-ldw r2 sp
-add sp sp 2
-ldw r1 sp
-add sp sp 2
-ldw r0 sp
-add sp sp 2
+bnz .__setword r2
 
 ; return to caller
-ldw r6 sp
-jmp r6
+ldw r4 sp
+add sp sp 2
+jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The length must be a multiple of the word size.
 ;
-; r0 address
-; r1 length (return value)
+; in  r0 address
+; out r3 length
 .strlen
-; save registers to be used
-sub sp sp 2
-stw sp r0
-sub sp sp 2
-stw sp r2
 
-mov r1 0
+mov r3 0
 
-._countchar
+.__countchar
 
 ldb r2 r0
-add r1 r1 1
+add r3 r3 1
 add r0 r0 1
 
-bnz ._countchar r2
+bnz .__countchar r2
 
-sub r1 r1 1
-
-; restore used registers
-ldw r2 sp
-add sp sp 2
-ldw r0 sp
-add sp sp 2
+sub r3 r3 1
 
 ; return to caller
-ldw r6 sp
-jmp r6
+ldw r4 sp
+add sp sp 2
+jmp r4
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; The length must be a multiple of the word size.
+;
+; r0 destination address
+; r1 source address
+.strcpy
+
+.__copychar
+
+ldb r2 r1
+stw r0 r2
+add r0 r0 1
+add r1 r1 1
+
+bnz .__copychar r2
+
+; return to caller
+ldw r4 sp
+add sp sp 2
+jmp r4

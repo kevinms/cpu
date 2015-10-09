@@ -13,8 +13,9 @@ stw sp ._ra0
 jmp .strlen
 ._ra0
 
-mov r2 r1
-add r2 r2 1
+add r5 r3 1; save length for later
+
+mov r2 r5
 mov r0 0x4000
 mov r1 .data
 sub sp sp 2
@@ -22,9 +23,9 @@ stw sp ._ra1
 jmp .memcpy
 ._ra1
 
-
 mov r0 .data
 mov r1 0
+mov r2 r5
 sub sp sp 2
 stw sp ._ra2
 jmp .memset

@@ -327,7 +327,7 @@ int hitBreakpoint()
 			struct instruction o;
 			fetchInst(pc, &o);
 
-			if ((o.op == jmp) && (o.m0 != 0) && (o.raw0 == 6)) {
+			if ((o.op == jmp) && (o.m0 != 0) && (o.raw0 == 4)) {
 				printf("Hit breakpoint #%" PRIu64 ": jmp r8\n", i);
 				hitBP = bp;
 			}
@@ -436,11 +436,12 @@ void interactive()
 		}
 		if (input[0] == 'h') {
 			printf("s - step forward one instruction\n");
-			printf("c - continue until breakpoint end of execution\n");
+			printf("c - continue until breakpoint or end of execution\n");
 			printf("m - print memory contents\n");
 			printf("r - print register contents\n");
 			printf("b - list or add breakpoints\n");
 			printf("d - delete breakpoints\n");
+			printf("f - continue until return from function\n");
 		}
 
 		printf("#> ");
