@@ -30,37 +30,38 @@
 // Instruction Op Codes
 #define nop  0b00000000
 
-#define add  0b00000001 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define sub  0b00000010 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define adc  0b00000011 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define sbc  0b00000100 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define mul  0b00000101 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define div  0b00000110 // -mm dst{r}   lhs{r,c}  rhs{r,c}
+//      inst opcode      mode dest   lhs   rhs
+#define add  0b00000001 // 2  d[r]   l[r]  r[r,c]
+#define sub  0b00000010 // 2  d[r]   l[r]  r[r,c]
+#define adc  0b00000011 // 2  d[r]   l[r]  r[r,c]
+#define sbc  0b00000100 // 2  d[r]   l[r]  r[r,c]
+#define mul  0b00000101 // 2  d[r]   l[r]  r[r,c]
+#define div  0b00000110 // 2  d[r]   l[r]  r[r,c]
 
-#define ldw  0b00000111 // -m- dst{r}   src{r,c}
-#define stw  0b00001000 // mm- dst{r,c} src{r,c}
-#define ldb  0b00001001 // -m- dst{r}   src{r,c}
-#define stb  0b00001010 // mm- dst{r,c} src{r,c}
+#define ldw  0b00000111 // 1  d[r]   src[r,c]
+#define ldb  0b00001000 // 1  d[r]   src[r,c]
+#define stw  0b00001001 // 0  d[r,c] src[r]
+#define stb  0b00001010 // 0  d[r,c] src[r]
 
-#define mov  0b00001011 // -m- dst{r}   src{r,c}
+#define mov  0b00001011 // 1  d[r]   src[r,c]
 
-#define and  0b00001100 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define or   0b00001101 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define xor  0b00001110 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define nor  0b00001111 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define lsl  0b00010000 // -mm dst{r}   lhs{r,c}  rhs{r,c}
-#define lsr  0b00010001 // -mm dst{r}   lhs{r,c}  rhs{r,c}
+#define and  0b00001100 // 2  d[r]   l[r]  r[r,c]
+#define or   0b00001101 // 2  d[r]   l[r]  r[r,c]
+#define xor  0b00001110 // 2  d[r]   l[r]  r[r,c]
+#define nor  0b00001111 // 2  d[r]   l[r]  r[r,c]
+#define lsl  0b00010000 // 2  d[r]   l[r]  r[r,c]
+#define lsr  0b00010001 // 2  d[r]   l[r]  r[r,c]
 
-#define bez  0b00010010 // mm- dst{r,c} lhs{r,c}
-#define bnz  0b00010011 // mm- dst{r,c} lhs{r,c}
-#define ble  0b00010100 // mm- dst{r,c} lhs{r,c}
-#define bge  0b00010101 // mm- dst{r,c} lhs{r,c}
-#define bne  0b00010110 // mmm dst{r,c} lhs{r,c}  rhs{r,c}
-#define beq  0b00010111 // mmm dst{r,c} lhs{r,c}  rhs{r,c}
-#define jmp  0b00011000 // m-- dst{r,c}
+#define bez  0b00010010 // 0  d[r,c] l[r]
+#define bnz  0b00010011 // 0  d[r,c] l[r]
+#define ble  0b00010100 // 0  d[r,c] l[r]  r[r]
+#define bge  0b00010101 // 0  d[r,c] l[r]  r[r]
+#define bne  0b00010110 // 0  d[r,c] l[r]  r[r]
+#define beq  0b00010111 // 0  d[r,c] l[r]  r[r]
+#define jmp  0b00011000 // 0  d[r,c]
 
-#define in   0b00011001 // ---
-#define out  0b00011010 // ---
+#define in   0b00011001
+#define out  0b00011010
 
 #define die  0b11111111
 // End Instruction Op Codes

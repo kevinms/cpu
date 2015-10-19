@@ -26,25 +26,27 @@
 // r11 to r12 --> p0 to p1  Port Mapped I/O
 // r13 to r16 --> c0 to c4  64bit Hardware Counter
 
-#define FL_CARRY 0x1
-uint16_t r[16], pc, fl;
+#define NUM_REGISTERS 16
+uint32_t r[NUM_REGISTERS], pc, fl;
 uint8_t mem[65536];
 
 uint64_t 	ic;
-uint16_t 	nextPC;
+uint32_t 	nextPC;
 char		msg[4096];
 int			beInteractive = 0;
 uint64_t	maxCycles = UINT64_MAX;
 char		*romFile = NULL;
 char		*blobFile = NULL;
-uint16_t	blobOffset = 0x400;
-
+uint32_t	blobOffset = 0x400;
 
 struct instruction {
 	uint8_t op;
-	uint16_t opr0, opr1, opr2;
-	uint16_t raw0, raw1, raw2;
-	int m0, m1, m2;
+	uint8_t mode;
+	uint8_t reg0;
+	uint8_t reg1;
+
+	uint32_t raw0, raw2; // remove raw0
+	uint32_t opr0, opr1, opr2;
 };
 
 void initEnvironment()
@@ -55,7 +57,7 @@ void initEnvironment()
 	fl = 0;
 }
 
-int loadBinaryBlob(char *path, uint16_t offset)
+int loadBinaryBlob(char *path, uint32_t offset)
 {
 	int		fd;
 	uint8_t	buf[65536];
@@ -95,7 +97,12 @@ void read8bit(char *bits, uint8_t *memory)
 
 void read16bit(char *bits, uint8_t *memory)
 {
-	*(uint16_t *)memory = htons((uint16_t)strtoul(bits, NULL, 2));
+	*(uint32_t *)memory = htons((uint32_t)strtoul(bits, NULL, 2));
+}
+
+void read32bit(char *bits, uint8_t *memory)
+{
+	*(uint32_t *)memory = htonl((uint32_t)strtoul(bits, NULL, 2));
 }
 
 int loadROM(char *path)
@@ -122,6 +129,9 @@ int loadROM(char *path)
 		} else if (c == 16) {
 			read16bit(buf, mem+pc);
 			pc += 2;
+		} else if (c == 32) {
+			read32bit(buf, mem+pc);
+			pc += 4;
 		}
 	}
 
@@ -130,19 +140,28 @@ int loadROM(char *path)
 	return(returnValue);
 }
 
-uint16_t
-fetchInst(uint16_t lpc, struct instruction *o)
+uint32_t
+fetchInst(uint32_t lpc, struct instruction *o)
 {
 	uint8_t *i = mem + lpc;
 
+	/*
+	 * Decode the instruction into it's logical pieces.
+	 */
 	o->op = i[0];
+	o->mode = i[1];
+	o->reg0 = i[2];
+	o->reg1 = i[3];
+	o->raw2 = ntohl(*(uint32_t *)(i + 4));
 
-	o->raw0 = (i[2] << 8) | i[3]; o->opr0 = o->raw0; o->m0 = 0;
-	o->raw1 = (i[4] << 8) | i[5]; o->opr1 = o->raw1; o->m1 = 0;
-	o->raw2 = (i[6] << 8) | i[7]; o->opr2 = o->raw2; o->m2 = 0;
-	if (i[1] & MODE_BITA) { o->opr0 = r[o->opr0]; o->m0 = 1; }
-	if (i[1] & MODE_BITB) { o->opr1 = r[o->opr1]; o->m1 = 1; }
-	if (i[1] & MODE_BITC) { o->opr2 = r[o->opr2]; o->m2 = 1; }
+	/*
+	 * Set final operand values based on address mode.
+	 * Operand 0 and 1 are always register direct.
+	 * Operand 2 is based on the mode bit.
+	 */
+	o->opr0 = r[o->reg0];
+	o->opr1 = r[o->reg1];
+	if (o->mode & MODE_BITC) { o->opr2 = r[o->opr2]; }
 
 	return(lpc + 8);
 } 
@@ -187,25 +206,25 @@ void dumpMemory(int width)
 	printf("\n");
 }
 
-void dumpRegisters(int printHeader, uint16_t nextPC, char *message)
+void dumpRegisters(int printHeader, uint32_t nextPC, char *message)
 {
 	int i;
 
 	if (printHeader) {
 		printf("%25s    pc   npc flags ", "");
-		for (i = 0; i < 8; i++)
+		for (i = 0; i < NUM_REGISTERS; i++)
 			printf("   r%d ", i);
 		printf("\n");
 	}
 
 	printf("%-25s", message == NULL ? "" : message);
 
-	printf(" %5" PRIu16 " %5" PRIu16 " ", pc, nextPC);
+	printf(" %5" PRIu32 " %5" PRIu32 " ", pc, nextPC);
 	printf("%c%c%c%c  ",
 	       fl & FL_N ? 'n' : ' ', fl & FL_Z ? 'z' : ' ',
 	       fl & FL_V ? 'v' : ' ', fl & FL_C ? 'c' : ' ');
 	for(i = 0; i < 8; i++)
-		printf("%5" PRIu16 " ", r[i]);
+		printf("%5" PRIu32 " ", r[i]);
 	printf("\n");
 }
 
@@ -318,8 +337,8 @@ int hitBreakpoint()
 	for (bp = bp_list, i = 0; bp != NULL; bp = bp->next, ++i) {
 		switch (bp->type) {
 		case BP_PC:
-			if (pc == (uint16_t)bp->condition) {
-				printf("Hit breakpoint #%" PRIu64 ": PC == 0x%" PRIX16 "\n", i, pc);
+			if (pc == (uint32_t)bp->condition) {
+				printf("Hit breakpoint #%" PRIu64 ": PC == 0x%" PRIX32 "\n", i, pc);
 				hitBP = bp;
 			}
 			break;
@@ -327,7 +346,7 @@ int hitBreakpoint()
 			struct instruction o;
 			fetchInst(pc, &o);
 
-			if ((o.op == jmp) && (o.m0 != 0) && (o.raw0 == 4)) {
+			if ((o.op == jmp) && (o.mode & MODE_BITC) && (o.raw0 == 4)) {
 				printf("Hit breakpoint #%" PRIu64 ": jmp r8\n", i);
 				hitBP = bp;
 			}
@@ -402,7 +421,7 @@ void interactive()
 		}
 		if (input[0] == 'm') {
 			sscanf(input, "%s %s", cmd, opt1);
-			num = 16;
+			num = 32;
 			if (opt1[0] != '\0') {
 				num = strtoull(opt1, NULL, 0);
 			}
@@ -543,8 +562,7 @@ void parseArgs(int argc, char **argv)
 int main(int argc, char **argv)
 {
 	int			stop;
-	uint16_t	opr0, opr1, opr2;
-	uint8_t		*i;
+	struct instruction o;
 
 	parseArgs(argc, argv);
 
@@ -563,151 +581,138 @@ int main(int argc, char **argv)
 	while (!stop && (maxCycles-- > 0)) {
 
 		interactive();
+		fetchInst(pc, &o);
 
-		i = mem + pc;
 		nextPC = pc + 8;
 
-		opr0 = (i[2] << 8) | i[3];
-		opr1 = (i[4] << 8) | i[5];
-		opr2 = (i[6] << 8) | i[7];
-		opr0 = i[1] & MODE_BITA ? r[opr0] : opr0;
-		opr1 = i[1] & MODE_BITB ? r[opr1] : opr1;
-		opr2 = i[1] & MODE_BITC ? r[opr2] : opr2;
-
-		//printf("%" PRIu8 " %" PRIu8 " %" PRIu16 " %" PRIu16 " %" PRIu16 "\n",
-		//		i[0], i[1], opr0, opr1, opr2);
-
-		//printf("i: %d\n", i[0] >> 2);
-
-		switch (i[0]) {
+		switch (o.op) {
 
 		case nop:
 			log("nop\n");
 			break;
 		case add:
-			log("add r[%" PRIu16 "] = %" PRIu16 " + %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 + opr2;
-			if ((UINT16_MAX - opr1) < opr2) {
-				fl |= FL_CARRY;
+			log("add r[%" PRIu32 "] = %" PRIu32 " + %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 + o.opr2;
+			if ((UINT16_MAX - o.opr1) < o.opr2) {
+				fl |= FL_C;
 			}
 			break;
 		case sub:
-			log("sub r[%" PRIu16 "] = %" PRIu16 " - %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 - opr2;
+			log("sub r[%" PRIu32 "] = %" PRIu32 " - %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 - o.opr2;
 			break;
 		case adc:
-			log("adc r[%" PRIu16 "] = %" PRIu16 " + %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 + opr2 + (fl & FL_CARRY);
-			if ((UINT16_MAX - opr1) < opr2) {
-				fl |= FL_CARRY;
+			log("adc r[%" PRIu32 "] = %" PRIu32 " + %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 + o.opr2 + (fl & FL_C);
+			if ((UINT16_MAX - o.opr1) < o.opr2) {
+				fl |= FL_C;
 			}
 			break;
 		case sbc:
-			log("sbc r[%" PRIu16 "] = %" PRIu16 " - %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 - opr2;
+			log("sbc r[%" PRIu32 "] = %" PRIu32 " - %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 - o.opr2;
 			break;
 		case mul:
-			log("mul r[%" PRIu16 "] = %" PRIu16 " * %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 * opr2;
+			log("mul r[%" PRIu32 "] = %" PRIu32 " * %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 * o.opr2;
 			break;
 		case div:
-			log("div r[%" PRIu16 "] = %" PRIu16 " / %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 / opr2;
+			log("div r[%" PRIu32 "] = %" PRIu32 " / %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 / o.opr2;
 			break;
 		case ldb:
-			log("ldb r[%" PRIu16 "] = mem[%" PRIu16 "]", opr0, opr1);
-			r[opr0] = mem[opr1];
+			log("ldb r[%" PRIu32 "] = mem[%" PRIu32 "]", o.opr0, o.opr1);
+			r[o.opr0] = mem[o.opr1];
 			break;
 		case stb:
-			log("stb mem[%" PRIu16 "] = %" PRIu16, opr0, opr1);
-			mem[opr0] = opr1 & 0xFF;
+			log("stb mem[%" PRIu32 "] = %" PRIu32, o.opr0, o.opr1);
+			mem[o.opr0] = o.opr1 & 0xFF;
 			break;
 		case ldw:
-			log("ldw r[%" PRIu16 "] = mem[%" PRIu16 "]", opr0, opr1);
-			r[opr0] = (mem[opr1] << 8) | mem[opr1+1];
+			log("ldw r[%" PRIu32 "] = mem[%" PRIu32 "]", o.opr0, o.opr1);
+			r[o.opr0] = (mem[o.opr1] << 8) | mem[o.opr1+1];
 			break;
 		case stw:
-			log("stw mem[%" PRIu16 "] = %" PRIu16, opr0, opr1);
-			mem[opr0] = opr1 >> 8;
-			mem[opr0+1] = opr1 & 0xFF;
+			log("stw mem[%" PRIu32 "] = %" PRIu32, o.opr0, o.opr1);
+			mem[o.opr0] = o.opr1 >> 8;
+			mem[o.opr0+1] = o.opr1 & 0xFF;
 			break;
 		case mov:
-			log("mov r[%" PRIu16 "] = %" PRIu16, opr0, opr1);
-			r[opr0] = opr1;
+			log("mov r[%" PRIu32 "] = %" PRIu32, o.opr0, o.opr1);
+			r[o.opr0] = o.opr1;
 			break;
 		case and:
-			log("and r[%" PRIu16 "] = %" PRIu16 " & %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 & opr2;
+			log("and r[%" PRIu32 "] = %" PRIu32 " & %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 & o.opr2;
 			break;
 		case or:
-			log("or r[%" PRIu16 "] = %" PRIu16 " | %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 | opr2;
+			log("or r[%" PRIu32 "] = %" PRIu32 " | %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 | o.opr2;
 			break;
 		case xor:
-			log("xor r[%" PRIu16 "] = %" PRIu16 " ^ %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 ^ opr2;
+			log("xor r[%" PRIu32 "] = %" PRIu32 " ^ %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 ^ o.opr2;
 			break;
 		case nor:
-			log("nor r[%" PRIu16 "] = ~%" PRIu16 " & ~%" PRIu16, opr0, opr1, opr2);
-			r[opr0] = ~opr1 & ~opr2;
+			log("nor r[%" PRIu32 "] = ~%" PRIu32 " & ~%" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = ~o.opr1 & ~o.opr2;
 			break;
 		case lsl:
-			log("lsl r[%" PRIu16 "] = %" PRIu16 " << %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 << opr2;
+			log("lsl r[%" PRIu32 "] = %" PRIu32 " << %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 << o.opr2;
 			break;
 		case lsr:
-			log("lsr r[%" PRIu16 "] = %" PRIu16 " >> %" PRIu16, opr0, opr1, opr2);
-			r[opr0] = opr1 >> opr2;
+			log("lsr r[%" PRIu32 "] = %" PRIu32 " >> %" PRIu32, o.opr0, o.opr1, o.opr2);
+			r[o.opr0] = o.opr1 >> o.opr2;
 			break;
 		case bez:
-			log("bez %" PRIu16 " %" PRIu16 " == 0", opr0, opr1);
-			if (opr1 == 0) {
-				nextPC = opr0;
+			log("bez %" PRIu32 " %" PRIu32 " == 0", o.opr0, o.opr1);
+			if (o.opr1 == 0) {
+				nextPC = o.opr0;
 				fl |= FL_Z;
 			}
 			break;
 		case bnz:
-			log("bnz %" PRIu16 " %" PRIu16 " == 0", opr0, opr1);
-			if (opr1 != 0) {
-				nextPC = opr0;
+			log("bnz %" PRIu32 " %" PRIu32 " == 0", o.opr0, o.opr1);
+			if (o.opr1 != 0) {
+				nextPC = o.opr0;
 				fl &= ~FL_Z;
 			}
 			break;
 		case ble:
-			log("ble %" PRIu16 " %" PRIu16 " <= 0", opr0, opr1);
-			if (opr1 <= 0) {
-				nextPC = opr0;
+			log("ble %" PRIu32 " %" PRIu32 " <= 0", o.opr0, o.opr1);
+			if (o.opr1 <= 0) {
+				nextPC = o.opr0;
 			}
 			break;
 		case bge:
-			log("bge %" PRIu16 " %" PRIu16 " >= 0", opr0, opr1);
-			if (opr1 >= 0) {
-				nextPC = opr0;
+			log("bge %" PRIu32 " %" PRIu32 " >= 0", o.opr0, o.opr1);
+			if (o.opr1 >= 0) {
+				nextPC = o.opr0;
 			}
 			break;
 		case bne:
-			log("bne %" PRIu16 " %" PRIu16 " != %" PRIu16, opr0, opr1, opr2);
-			if (opr1 != opr2) {
-				nextPC = opr0;
+			log("bne %" PRIu32 " %" PRIu32 " != %" PRIu32, o.opr0, o.opr1, o.opr2);
+			if (o.opr1 != o.opr2) {
+				nextPC = o.opr0;
 			}
 			break;
 		case beq: break;
-			log("beq %" PRIu16 " %" PRIu16 " == %" PRIu16, opr0, opr1, opr2);
-			if (opr1 == opr2) {
-				nextPC = opr0;
+			log("beq %" PRIu32 " %" PRIu32 " == %" PRIu32, o.opr0, o.opr1, o.opr2);
+			if (o.opr1 == o.opr2) {
+				nextPC = o.opr0;
 			}
 			break;
 		case jmp:
-			log("jmp %" PRIu16, opr0);
-			nextPC = opr0;
+			log("jmp %" PRIu32, o.opr0);
+			nextPC = o.opr0;
 			break;
 		case die:
 			log("die");
 			stop = 1;
 			break;
 		default:
-			fprintf(stderr, "Unknown opcode: %" PRIu16 " %" PRIu16 " %" PRIu16
-					" %" PRIu16 "\n", i[0], i[1], i[2], i[3]);
+			fprintf(stderr, "Unknown opcode: %" PRIu32 "\n", o.op);
 			break;
 		}
 		dumpRegisters(0, nextPC, msg);

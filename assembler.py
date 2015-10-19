@@ -34,16 +34,18 @@ def parseISA():
 		o = comment.split()
 		#print i, o
 
-		op = { 'opcode': "", 'operands': 0, 'opr0': "", 'opr1': "", 'opr2': "" }
+		op = { 'opcode': "", 'operands': 0, 'var': 0, 'opr0': "", 'opr1': "", 'opr2': "" }
 		op['opcode'] = i[2][2:]
+		if len(o) > 0:
+			op['var'] = int(o[0], 10)
 
 		if len(o) > 1:
 			op['operands'] = len(o) - 1
-			op['opr0'] = ''.join(re.search('\{(.*?)\}', o[1]).group(1).split(','))
+			op['opr0'] = ''.join(re.search('\[(.*?)\]', o[1]).group(1).split(','))
 			if len(o) > 2:
-				op['opr1'] = ''.join(re.search('\{(.*?)\}', o[2]).group(1).split(','))
+				op['opr1'] = ''.join(re.search('\[(.*?)\]', o[2]).group(1).split(','))
 			if len(o) > 3:
-				op['opr2'] = ''.join(re.search('\{(.*?)\}', o[3]).group(1).split(','))
+				op['opr2'] = ''.join(re.search('\[(.*?)\]', o[3]).group(1).split(','))
 
 		#print op
 
@@ -81,7 +83,7 @@ def loadLabels(source):
 			progOffset += 8
 
 def parseOperand(opr, modes, line, bits):
-	modebit = '0'
+	modebit = 0
 	if opr == 'sp':
 		opr = 'r15'
 	if opr[0] == '.':
@@ -95,13 +97,13 @@ def parseOperand(opr, modes, line, bits):
 		#return format(labels[opr[1:]], bits), modebit
 	if opr[0] == 'r':
 		if 'r' not in modes:
-			error('line '+str(line)+': Operand does not support register address mode.')
+			error('line '+str(line)+': Operand does not support register direct mode.')
 		if 'r' in modes and 'c' in modes:
-			modebit = '1'
+			modebit = 1
 		return format(int(opr[1:]), bits), modebit
 	else:
 		if 'c' not in modes:
-			error('line '+str(line)+': Operand does not support immediate address mode '+str(opr))
+			error('line '+str(line)+': Operand does not support immediate mode '+str(opr))
 		if opr[0] == '\'' and opr[2] == '\'':
 			opr = str(ord(opr[1]))
 		return format(int(opr, 0), bits), modebit
@@ -129,7 +131,7 @@ def assemble(source):
 			continue
 
 		if i == 'w':
-			opr0, m0 = parseOperand(args[0], 'c', lineNum, '016b')
+			opr0, m0 = parseOperand(args[0], 'c', lineNum, '032b')
 			print opr0
 			continue;
 		if i == 'b':
@@ -139,10 +141,8 @@ def assemble(source):
 
 		op = iset[i]
 		opcode = op['opcode']
-		opr0 = format(0, '016b')
-		opr1 = format(0, '016b')
-		opr2 = format(0, '016b')
-		m0 = m1 = m2 = '0'
+		opr0 = opr1 = opr2 = None
+		m0 = m1 = m2 = 0
 
 		if int(op['operands']) != len(args):
 			error('line '+str(lineNum)+': Expected '+str(op['operands'])+' operands but found '+str(len(args)))
@@ -152,16 +152,35 @@ def assemble(source):
 		#print args
 
 		if len(args) > 0:
-			opr0, m0 = parseOperand(args[0], op['opr0'], lineNum, '016b')
+			opr0, m0 = parseOperand(args[0], op['opr0'], lineNum, '032b' if op['var'] == 0 else '08b')
 		if len(args) > 1:
-			opr1, m1 = parseOperand(args[1], op['opr1'], lineNum, '016b')
+			opr1, m1 = parseOperand(args[1], op['opr1'], lineNum, '032b' if op['var'] == 1 else '08b')
 		if len(args) > 2:
-			opr2, m2 = parseOperand(args[2], op['opr2'], lineNum, '016b')
+			opr2, m2 = parseOperand(args[2], op['opr2'], lineNum, '032b' if op['var'] == 2 else '08b')
 
-		modebits = m0+m1+m2
-		modebits = format(int(modebits), '08b')
+		mode = m0+m1+m2
+		if mode > 1:
+			error('line '+str(lineNum)+': Only one operand can be variable mode:'+str(m0)+str(m1)+str(m2))
+			sys.exit(1)
+		mode = format(int(mode), '08b')
 
-		print opcode+modebits, opr0, opr1, opr2
+		# Only one operand is variable and which one differs based on the opcode.
+		# Makes the assembly look ugly, but lets us be compact.
+		if op['var'] == 0:
+			packInstruction(opcode, mode, opr1, opr2, opr0)
+		if op['var'] == 1:
+			packInstruction(opcode, mode, opr0, opr2, opr1)
+		if op['var'] == 2:
+			packInstruction(opcode, mode, opr0, opr1, opr2)
+
+def packInstruction(opcode, mode, opr0, opr1, opr2):
+	if opr0 is None:
+		opr0 = format(0, '08b')
+	if opr1 is None:
+		opr1 = format(0, '08b')
+	if opr2 is None:
+		opr2 = format(0, '032b')
+	print opcode, mode, opr0, opr1, opr2
 
 options = [
 	('h','help','This help.'),
