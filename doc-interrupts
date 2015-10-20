@@ -1,0 +1,53 @@
+#######################################################################
+#
+# CPU Interrupts
+#
+#######################################################################
+
+Having a timer based interrupt for task switching, seems like a good
+idea. Maybe allow interrupts on GPIO pins for interfacing with external
+hardware. Not sure what all interrupts will be useful for, but task
+switching seems like a good place to start.
+
+Things to consider:
+
+	+ How will interrupts be configured by software?
+	+ What all does the interrupt handler need to do?
+	+ What minimum set of process state can be stored?
+	+ Global enable and disable?
+	+ Pending interrupts?
+
+All registers and flags used to control interrupts could be memory
+mapped. This would help keep the number of addressable registers
+low. The memory map could look something like:
+
+# bits 
+  32    Global interrupt flags (global disable/enable).
+  32    Pending interrupts.
+  32    Per-interrupt enable/disable.
+ 32*32  Vector of interrupt handler addresses.
+
+The pending interrupt register being 32 bits and vector being 32
+addresses would allow 32 configurable interrupts. I can imagine a couple
+timers and potentially GPIO pins triggering interrupts. 32 is probably
+overkill, but since I switched to 32bit addressing, I don't worry about
+space anymore :-)
+
+So, let's say we have a 32bit counter register. Every clock it is
+incremented. When the counter reaches certain values, we want an
+interrupt to be triggered. The interval is yet another 32bit
+register. When the counter is the right value, the CPU will clear
+the global enable interrupt bit. This will mask all interrupts until
+they are enabled again. Until interrupts are enabled again, any incoming
+interrupts will cause a pending interrupt bit to be set.
+
+The CPU pipeline (if any) needs to be cleared and the PC is set to the
+interrupt handler address. The first thing the handler should do is
+store any important processes state before a task switch. That probably
+means storing all registers to the current stack. It then looks up which
+process is next in line to have CPU time and loads it's base address
+into the base register. All the process' saved registers are restored
+from it's stack. The PC is restored by doing an uncoditional jump out
+of the interrupt handler.
+Once the interrupt handler has performed all critical steps, it should re-enable interrupts.
+There coudl be a race here. Not sure....

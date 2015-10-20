@@ -1,0 +1,64 @@
+#######################################################################
+#
+# Position Independent Code
+#
+#######################################################################
+
+Things to consider:
+
+	+ Loading programs at abitrary locations.
+	+ Calling functions in shared libraries.
+	+ Calling functions in kernel region.
+	+ Where each process' stack resides.
+	+ Where each process' heap resides.
+	+ Shared heap between all processes.
+
+Just to jot down some different ways this could be accomplished:
+
+1. Base + Offset
+
+	There could be 2 types of jumps: absolute and relative. It would
+	just be a mode bit that tells you which one. Relative jumps would
+	always add the jump address to a base register. The task switcher
+	would be responsible for setting the base register for each process.
+
+	To call code at absolute offsets, i.e. kernel and standard library,
+	absolute jumps would be used. The jump address would not be added to
+	the base register.
+
+	This has the added benefit of allowing position independent shared
+	libraries as well. There could be a global lookup table of base
+	addresses for all shared libraries. The process could store their
+	base address before calling the shared library and the shared
+	library would pop the caller's base from the stack when returning
+	and set it. This adds a little overhead to shared library calls
+	which I don't like, but is an option. Either statically link with
+	libraries or reserve an absolute address for it.
+
+	In this mode, access to the stack and heap would use absolute
+	addressing. When the kernel loads a program into memory it will
+	allocate a stack region. Both the heap and stack base address could
+	go into a reserved region in the binary itself. I.e. reserve a few
+	words at the beginning of a binary to hold the base addresses for
+	that process.
+
+2. PC + Offset
+
+	
+
+3. Loader Rewrites Code
+
+	All load and store instructions would have to be rewritten. This
+	means shared libraries would be rewritten as well. At run time, all
+	addresses would be absolute.
+
+	If we stored an address using a label at assemble time, when would
+	that address ever be rewritten? If we loaded the value and then used
+	it in a jump, it would be wrong.
+
+	What if the loader actually assembled the program before running it?
+	Just pass the starting location of the program to the assembler and
+	let it resolve the labels correctly. There would have to be some
+	convention to prevent some addresses that are already absolute
+	(i.e. standard library calls).
+
