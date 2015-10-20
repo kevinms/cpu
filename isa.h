@@ -40,8 +40,8 @@
 
 #define ldw  0b00000111 // 1  d[r]   src[r,c]
 #define ldb  0b00001000 // 1  d[r]   src[r,c]
-#define stw  0b00001001 // 0  d[r,c] src[r]
-#define stb  0b00001010 // 0  d[r,c] src[r]
+#define stw  0b00001001 // 1  d[r]   src[r,c]
+#define stb  0b00001010 // 1  d[r]   src[r,c]
 
 #define mov  0b00001011 // 1  d[r]   src[r,c]
 
@@ -54,8 +54,8 @@
 
 #define bez  0b00010010 // 0  d[r,c] l[r]
 #define bnz  0b00010011 // 0  d[r,c] l[r]
-#define ble  0b00010100 // 0  d[r,c] l[r]  r[r]
-#define bge  0b00010101 // 0  d[r,c] l[r]  r[r]
+#define ble  0b00010100 // 0  d[r,c] l[r]
+#define bge  0b00010101 // 0  d[r,c] l[r]
 #define bne  0b00010110 // 0  d[r,c] l[r]  r[r]
 #define beq  0b00010111 // 0  d[r,c] l[r]  r[r]
 #define jmp  0b00011000 // 0  d[r,c]
