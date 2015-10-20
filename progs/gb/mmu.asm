@@ -25,7 +25,7 @@ add sp sp 2
 jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Write a byte to memory at address.
+; Write 8 bits to memory at address.
 ; in  r0 address (16b)
 ; in  r1 data    (8b)
 .gb_write8
@@ -45,7 +45,4 @@ jmp r4
 ldw r4 sp
 add sp sp 2
 jmp r4
-
-
-.bob_sdkfsdf:
 

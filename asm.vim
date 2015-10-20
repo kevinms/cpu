@@ -97,7 +97,7 @@ hi def link asmDirective	Identifier
 hi def link asmSpecial		Special
 hi def link asmString		String
 
-let b:current_syntax = "asm"
+let b:current_syntax = "aaa"
 
 let &cpo = s:cpo_save
 unlet s:cpo_save
