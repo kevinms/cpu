@@ -66,7 +66,7 @@ int loadBinaryBlob(char *path, uint32_t offset)
 	printf("loading binary blob.\n");
 
 	if ((fd = open(path, O_RDONLY)) < 0) {
-		fprintf(stderr, "Failed open %s: %s\n", path, strerror(errno));
+		fprintf(stderr, "Can't open %s: %s\n", path, strerror(errno));
 		exit(1);
 	}
 
@@ -112,7 +112,7 @@ int loadROM(char *path)
 	int		returnValue;
 
 	if ((fd = fopen(path, "r")) == NULL) {
-		fprintf(stderr, "Failed open %s: %s\n", path, strerror(errno));
+		fprintf(stderr, "Can't open %s: %s\n", path, strerror(errno));
 		return(-1);
 	}
 
@@ -458,6 +458,9 @@ void interactive()
 				deleteAllBreakpoints();
 			}
 		}
+		if (input[0] == 'q') {
+			break;
+		}
 		if (input[0] == 'h') {
 			printf("s - step forward one instruction\n");
 			printf("c - continue until breakpoint or end of execution\n");
@@ -572,7 +575,9 @@ int main(int argc, char **argv)
 	parseArgs(argc, argv);
 
 	initEnvironment();
-	loadROM(romFile);
+	if (loadROM(romFile) < 0) {
+		return(1);
+	}
 
 	if (blobFile != NULL) {
 		loadBinaryBlob(blobFile, blobOffset);

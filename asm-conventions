@@ -14,7 +14,7 @@ done. However, coming up with reasonable conventions allows straight
 forward code reuse and aids in code maintenance. Here lies the
 conventions used by the standard library.
 
-All library functions use a double underscore prefix on all internal
+All library functions use a double underscore prefix on internal
 labels. User's of this library should not use the double underscore
 prefix to avoid label name conflicts.
 
