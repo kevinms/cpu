@@ -20,7 +20,7 @@ mov r0 0x4000
 mov r1 .data
 sub sp sp 2
 stw sp ._ra1
-jmp .memcpy
+jmp @.memcpy
 ._ra1
 
 mov r0 .data
@@ -28,7 +28,7 @@ mov r1 0
 mov r2 r5
 sub sp sp 2
 stw sp ._ra2
-jmp .memset
+jmp @.memset
 ._ra2
 
 die

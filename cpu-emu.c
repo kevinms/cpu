@@ -18,16 +18,71 @@
 		sprintf(msg, ##__VA_ARGS__); \
 	} while(0)
 
-// Registers
-// r0  to r7                General Purpose
-//        r8  --> sp        Stack Pointer
-//        r9  --> bn        Bank Number
-//        r10               Unused
-// r11 to r12 --> p0 to p1  Port Mapped I/O
-// r13 to r16 --> c0 to c4  64bit Hardware Counter
+/*
+ * Registers:
+ *
+ * r0  to r10      General Purpose
+ *        r11  sp  Stack Pointer
+ *        r12  ba  Base Address
+ *        r13  fl  CPU Flags
+ *        r14  c1  Timer 1 Counter
+ *        r15  c2  Timer 2 Counter
+ */
+#define R_SP r[11]
+#define R_BA r[12]
+#define R_FL r[13]
+#define R_C1 r[14]
+#define R_C2 r[15]
+
+/*
+ * Memory Mapped I/O:
+ *
+ * 0x0  +--------------------------+
+ *      | Global Interrupt Control |
+ * 0x4  +--------------------------+
+ *      | Pending Interrupts       |
+ * 0x8  +--------------------------+
+ * 	    | Per-Interrupt Control    |
+ * 0xC  +--------------------------+
+ * 	    | Interrupt Handler Vector |
+ * 	    | .                        |
+ * 	    | .                        |
+ * 	    | .                        |
+ * 0x8C +--------------------------+
+ * 	    | Timer 1 Terminal Count   |
+ * 0x90 +--------------------------+
+ * 	    | Timer 1 Control          |
+ * 0x94 +--------------------------+
+ * 	    | Timer 2 Terminal Count   |
+ * 0x98 +--------------------------+
+ * 	    | Timer 2 Control          |
+ * 0x9C +--------------------------+
+ * 	    | .                        |
+ * 	    | .                        |
+ * 	    | .                        |
+ */
+uint32_t mmapIOstart = 0;
+uint32_t mmapIOend = 0; //0x9C
+struct cpuState {
+	/*
+	 * Interrupts.
+	 */
+	uint32_t intGlobalControl;
+	uint32_t intPending;
+	uint32_t intControl;
+	uint32_t intVector[32];
+
+	/*
+	 * Timers (counters).
+	 */
+	uint32_t timerTerminalCount1;
+	uint32_t timerControl1;
+	uint32_t timerTerminalCount2;
+	uint32_t timerControl2;
+} cpu;
 
 #define NUM_REGISTERS 16
-uint32_t r[NUM_REGISTERS], pc, fl;
+uint32_t r[NUM_REGISTERS], pc;
 uint8_t mem[65536];
 
 uint64_t 	ic;
@@ -54,7 +109,6 @@ void initEnvironment()
 	memset(mem, 0, sizeof(mem));
 	memset(r, 0, sizeof(r));
 	pc = 0;
-	fl = 0;
 }
 
 int loadBinaryBlob(char *path, uint32_t offset)
@@ -90,17 +144,17 @@ int loadBinaryBlob(char *path, uint32_t offset)
 	return(0);
 }
 
-void read8bit(char *bits, uint8_t *memory)
+void parse8bit(char *bits, uint8_t *memory)
 {
 	*(uint8_t *)memory = (uint8_t)strtoul(bits, NULL, 2);
 }
 
-void read16bit(char *bits, uint8_t *memory)
+void parse16bit(char *bits, uint8_t *memory)
 {
 	*(uint32_t *)memory = htons((uint32_t)strtoul(bits, NULL, 2));
 }
 
-void read32bit(char *bits, uint8_t *memory)
+void parse32bit(char *bits, uint8_t *memory)
 {
 	*(uint32_t *)memory = htonl((uint32_t)strtoul(bits, NULL, 2));
 }
@@ -124,13 +178,13 @@ int loadROM(char *path)
 
 		int c = strlen(buf);
 		if (c == 8) {
-			read8bit(buf, mem+pc);
+			parse8bit(buf, mem+pc);
 			pc += 1;
 		} else if (c == 16) {
-			read16bit(buf, mem+pc);
+			parse16bit(buf, mem+pc);
 			pc += 2;
 		} else if (c == 32) {
-			read32bit(buf, mem+pc);
+			parse32bit(buf, mem+pc);
 			pc += 4;
 		}
 	}
@@ -162,7 +216,9 @@ fetchInst(uint32_t lpc, struct instruction *o)
 	o->opr0 = r[o->reg0];
 	o->opr1 = r[o->reg1];
 	o->opr2 = o->raw2;
-	if (o->mode & MODE_BITC) { o->opr2 = r[o->raw2]; }
+	if ((o->mode & MODE_OPERAND) == OPR_REG) {
+		o->opr2 = r[o->raw2];
+	}
 
 	return(lpc + 8);
 } 
@@ -226,8 +282,8 @@ void dumpRegisters(int printHeader, uint32_t nextPC, char *message)
 
 	printf(" %5" PRIu32 " %5" PRIu32 " ", pc, nextPC);
 	printf("%c%c%c%c  ",
-	       fl & FL_N ? 'n' : ' ', fl & FL_Z ? 'z' : ' ',
-	       fl & FL_V ? 'v' : ' ', fl & FL_C ? 'c' : ' ');
+	       R_FL & FL_N ? 'n' : ' ', R_FL & FL_Z ? 'z' : ' ',
+	       R_FL & FL_V ? 'v' : ' ', R_FL & FL_C ? 'c' : ' ');
 	for(i = 0; i < NUM_REGISTERS; i++)
 		printf("%5" PRIu32 " ", r[i]);
 	printf("\n");
@@ -351,7 +407,7 @@ int hitBreakpoint()
 			struct instruction o;
 			fetchInst(pc, &o);
 
-			if ((o.op == jmp) && (o.mode & MODE_BITC) && (o.raw2 == 4)) {
+			if ((o.op == jmp) && ((o.mode & MODE_OPERAND) == OPR_REG) && (o.raw2 == 4)) {
 				printf("Hit breakpoint #%" PRIu64 ": jmp r8\n", i);
 				hitBP = bp;
 			}
@@ -567,6 +623,144 @@ void parseArgs(int argc, char **argv)
 	}
 }
 
+uint32_t getAddress(uint8_t mode, uint32_t offset)
+{
+	if ((mode & MODE_ADDRESS) == ADDR_REL) {
+		/*
+		 * Relative Address.
+		 */
+		return(R_BA + offset);
+	} else {
+		/*
+		 * Absolute Address.
+		 */
+		return(offset);
+	}
+}
+
+uint32_t *mmapIOregister(uint32_t address)
+{
+	if (address >= 0x0 && address < 0x4) {
+		/*
+		 * Global Interrupt Control
+		 */
+		return &cpu.intGlobalControl;
+	}
+	if (address >= 0x4 && address < 0x8) {
+		/*
+		 * Pending Interrupts.
+		 */
+		return &cpu.intPending;
+	}
+	if (address >= 0x8 && address < 0xC) {
+		/*
+		 * Per-Interrupt Control
+		 */
+		return &cpu.intControl;
+	}
+	if (address >= 0xC && address < 0x8C) {
+		int i = (0xC - address) / 4;
+		/*
+		 * Interrupt Handler Vector
+		 */
+		return &cpu.intVector[i];
+	}
+
+	if (address >= 0x8C && address < 0x90) {
+		/*
+		 * Timer 1 Terminal Count
+		 */
+		return &cpu.timerTerminalCount1;
+	}
+	if (address >= 0x90 && address < 0x94) {
+		/*
+		 * Timer 1 Control
+		 */
+		return &cpu.timerControl1;
+	}
+	if (address >= 0x94 && address < 0x98) {
+		/*
+		 * Timer 2 Terminal Count
+		 */
+		return &cpu.timerTerminalCount2;
+	}
+	if (address >= 0x98 && address < 0x9C) {
+		/*
+		 * Timer 2 Control
+		 */
+		return &cpu.timerControl2;
+	}
+
+	return(NULL);
+}
+
+uint8_t read8bit(uint8_t mode, uint32_t offset)
+{
+	uint32_t address = getAddress(mode, offset);
+
+	return mem[address];
+}
+
+uint32_t read32bit(uint8_t mode, uint32_t offset)
+{
+	uint32_t address = getAddress(mode, offset);
+
+	if (address < mmapIOstart || address >= mmapIOend) {
+		/*
+		 * Normal memory access.
+		 */
+		return *(uint32_t *)(mem + address);
+	}
+
+	/*
+	 * Anything else must be memory mapped I/O.
+	 */
+	address -= mmapIOstart;
+
+	uint32_t *reg = mmapIOregister(address);
+
+	if (reg == NULL) {
+		fprintf(stderr, "Can't get memory mapped register to read.\n");
+		exit(1);
+	}
+
+	return(*reg);
+}
+
+void write8bit(uint8_t mode, uint32_t offset, uint8_t data)
+{
+	uint32_t address = getAddress(mode, offset);
+
+	mem[address] = data;
+}
+
+void write32bit(uint8_t mode, uint32_t offset, uint32_t data)
+{
+	uint32_t address = getAddress(mode, offset);
+
+	if (address < mmapIOstart || address >= mmapIOend) {
+		/*
+		 * Normal memory access.
+		 */
+		*(uint32_t *)(mem + address) = data;
+
+		return;
+	}
+
+	/*
+	 * Anything else must be memory mapped I/O.
+	 */
+	address -= mmapIOstart;
+
+	uint32_t *reg = mmapIOregister(address);
+
+	if (reg == NULL) {
+		fprintf(stderr, "Can't get memory mapped register to write.\n");
+		exit(1);
+	}
+	*reg = data;
+}
+
 int main(int argc, char **argv)
 {
 	int			stop;
@@ -595,6 +789,9 @@ int main(int argc, char **argv)
 
 		nextPC = pc + 8;
 
+		R_C1++;
+		R_C2++;
+
 		switch (o.op) {
 
 		case nop:
@@ -608,7 +805,7 @@ int main(int argc, char **argv)
 			log("add r[%" PRIu32 "] = %" PRIu32 " + %" PRIu32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 + o.opr2;
 			if ((UINT32_MAX - o.opr1) < o.opr2) {
-				fl |= FL_C;
+				R_FL |= FL_C;
 			}
 			break;
 		case sub:
@@ -617,9 +814,9 @@ int main(int argc, char **argv)
 			break;
 		case adc:
 			log("adc r[%" PRIu32 "] = %" PRIu32 " + %" PRIu32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 + o.opr2 + (fl & FL_C);
+			r[o.reg0] = o.opr1 + o.opr2 + (R_FL & FL_C);
 			if ((UINT32_MAX - o.opr1) < o.opr2) {
-				fl |= FL_C;
+				R_FL |= FL_C;
 			}
 			break;
 		case sbc:
@@ -640,20 +837,19 @@ int main(int argc, char **argv)
 		 */
 		case ldb:
 			log("ldb r[%" PRIu32 "] = mem[%" PRIu32 "]", o.reg0, o.opr2);
-			r[o.reg0] = mem[o.opr2];
+			r[o.reg0] = read8bit(o.mode, o.opr2);
 			break;
 		case ldw:
 			log("ldw r[%" PRIu32 "] = mem[%" PRIu32 "]", o.reg0, o.opr2);
-			r[o.reg0] = *(uint32_t *)(mem + o.opr2);
+			r[o.reg0] = read32bit(o.mode, o.opr2);
 			break;
 		case stb:
 			log("stb mem[%" PRIu32 "] = %" PRIu32, o.opr0, o.opr2);
-			mem[o.opr0] = o.opr2 & 0xFF;
+			write8bit(o.mode, o.opr0, (uint8_t)o.opr2);
 			break;
 		case stw:
 			log("stw mem[%" PRIu32 "] = %" PRIu32, o.opr0, o.opr2);
-			//((uint32_t *)mem)[o.opr0] = o.opr2;
-			*(uint32_t *)(mem+o.opr0) = o.opr2;
+			write32bit(o.mode, o.opr0, o.opr2);
 			break;
 		case mov:
 			log("mov r[%" PRIu32 "] = %" PRIu32, o.reg0, o.opr2);
@@ -694,44 +890,44 @@ int main(int argc, char **argv)
 		case bez:
 			log("bez %" PRIu32 " %" PRIu32 " == 0", o.opr2, o.opr0);
 			if (o.opr0 == 0) {
-				nextPC = o.opr2;
-				fl |= FL_Z;
+				nextPC = getAddress(o.mode, o.opr2);
+				R_FL |= FL_Z;
 			}
 			break;
 		case bnz:
 			log("bnz %" PRIu32 " %" PRIu32 " == 0", o.opr2, o.opr0);
 			if (o.opr0 != 0) {
-				nextPC = o.opr2;
-				fl &= ~FL_Z;
+				nextPC = getAddress(o.mode, o.opr2);
+				R_FL &= ~FL_Z;
 			}
 			break;
 		case ble:
 			log("ble %" PRIu32 " %" PRIu32 " <= 0", o.opr2, o.opr0);
 			if (o.opr0 <= 0) {
-				nextPC = o.opr2;
+				nextPC = getAddress(o.mode, o.opr2);
 			}
 			break;
 		case bge:
 			log("bge %" PRIu32 " %" PRIu32 " >= 0", o.opr2, o.opr0);
 			if (o.opr0 >= 0) {
-				nextPC = o.opr2;
+				nextPC = getAddress(o.mode, o.opr2);
 			}
 			break;
 		case bne:
 			log("bne %" PRIu32 " %" PRIu32 " != %" PRIu32, o.opr2, o.opr0, o.opr1);
 			if (o.opr0 != o.opr1) {
-				nextPC = o.opr2;
+				nextPC = getAddress(o.mode, o.opr2);
 			}
 			break;
 		case beq: break;
 			log("beq %" PRIu32 " %" PRIu32 " == %" PRIu32, o.opr2, o.opr0, o.opr1);
 			if (o.opr0 == o.opr1) {
-				nextPC = o.opr2;
+				nextPC = getAddress(o.mode, o.opr2);
 			}
 			break;
 		case jmp:
 			log("jmp %" PRIu32, o.opr2);
-			nextPC = o.opr2;
+			nextPC = getAddress(o.mode, o.opr2);
 			break;
 
 		/*

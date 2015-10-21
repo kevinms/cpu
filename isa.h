@@ -21,11 +21,13 @@
 #define FL_C 0b00010000 // Carry
 
 // Addressing Modes
-#define MODE_BITA 0b100
-#define MODE_BITB 0b010
-#define MODE_BITC 0b001
-#define MODE_REG  0b1 // Direct Register
-#define MODE_IMM  0b0 // Immediate Constant
+#define MODE_OPERAND 0b00000001
+#define OPR_IMM      0b0 // Immediate Value
+#define OPR_REG      0b1 // Register Direct
+
+#define MODE_ADDRESS 0b00000010
+#define ADDR_ABS     0b00 // Offset
+#define ADDR_REL     0b10 // Base + Offset
 
 // Instruction Op Codes
 #define nop  0b00000000
@@ -38,10 +40,10 @@
 #define mul  0b00000101 // 2  d[r]   l[r]  r[r,c]
 #define div  0b00000110 // 2  d[r]   l[r]  r[r,c]
 
-#define ldw  0b00000111 // 1  d[r]   src[r,c]
-#define ldb  0b00001000 // 1  d[r]   src[r,c]
-#define stw  0b00001001 // 1  d[r]   src[r,c]
-#define stb  0b00001010 // 1  d[r]   src[r,c]
+#define ldw  0b00000111 // 1  d[r]   src[@,r,c]
+#define ldb  0b00001000 // 1  d[r]   src[@,r,c]
+#define stw  0b00001001 // 1  d[@,r] src[r,c]
+#define stb  0b00001010 // 1  d[@,r] src[r,c]
 
 #define mov  0b00001011 // 1  d[r]   src[r,c]
 
@@ -52,13 +54,13 @@
 #define lsl  0b00010000 // 2  d[r]   l[r]  r[r,c]
 #define lsr  0b00010001 // 2  d[r]   l[r]  r[r,c]
 
-#define bez  0b00010010 // 0  d[r,c] l[r]
-#define bnz  0b00010011 // 0  d[r,c] l[r]
-#define ble  0b00010100 // 0  d[r,c] l[r]
-#define bge  0b00010101 // 0  d[r,c] l[r]
-#define bne  0b00010110 // 0  d[r,c] l[r]  r[r]
-#define beq  0b00010111 // 0  d[r,c] l[r]  r[r]
-#define jmp  0b00011000 // 0  d[r,c]
+#define bez  0b00010010 // 0  d[@,r,c] l[r]
+#define bnz  0b00010011 // 0  d[@,r,c] l[r]
+#define ble  0b00010100 // 0  d[@,r,c] l[r]
+#define bge  0b00010101 // 0  d[@,r,c] l[r]
+#define bne  0b00010110 // 0  d[@,r,c] l[r]  r[r]
+#define beq  0b00010111 // 0  d[@,r,c] l[r]  r[r]
+#define jmp  0b00011000 // 0  d[@,r,c]
 
 #define in   0b00011001
 #define out  0b00011010
