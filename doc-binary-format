@@ -1,0 +1,62 @@
+#######################################################################
+#
+# Executable Binary Format
+#
+#######################################################################
+
+The kernel is responsible for loading binaries into memory and
+executing them. Binaries are assembled to either be completely position
+independent or reside at a static location in memory. In the later case
+the loader needs to know the static position. A reasonable place to
+store this typpe of information is in the binary itself. This document
+describes the binary format. All binaries expected to be run by the
+kernel should be in this format.  
+
+Binary Format:
+
++---------------+
+| Magic Number  |
++---------------+
+| Base Address  |
++---------------+
+| Stack Address |
++---------------+
+| Stack Size    |
++---------------+
+| Heap Address  |
++---------------+
+| Heap Size     |
++---------------+
+| Program       |
+| .             |
+| .             |
+| .             |
++---------------+
+| Checksum      |
++---------------+
+
+
+Field Descriptions:
+
+Magic Number
+	Set by the assembler.
+	Checked by the kernel to verify this is an executable binary.
+
+Base Address
+	Set by the assembler.
+	Checked by the kernel to know where to load the executable binary.
+	If zero, the kernel dynamically places it and updates this value
+	to reflect it's actual location.
+	If non-zero, the kernel attempts to place it at the provided
+	address. It fails if it can't.
+
+Stack Address
+	Net set by the assembler.
+	Set by the kernel.
+
+Stack Size
+	Set by the assembler to request a specific size.
+	Checked by the kernel to know how large of a stack to allocate.
+	If zero, the kernel will use the default stack size and updates
+	this value with the actual size.
+	If non-zero, 
