@@ -6,6 +6,10 @@ iset = {}   # instruction set
 labels = {} # label table
 alias = {'sp':'r11', 'ba':'r12', 'fl':'r13', 'c1':'r14', 'c2':'r15'}
 
+magicNumber = 0xDEADC0DE
+baseAddress = stackAddress = stackSize = heapAddress = heapSize = 0x0
+
+
 def error(msg):
 	print >> sys.stderr, msg
 	sys.exit(1)
@@ -57,7 +61,7 @@ def parseISA():
 
 def loadLabels(source):
 	lineNum = 0
-	progOffset = 0
+	progOffset = baseAddress
 	for line in source:
 		lineNum += 1
 		code, octothorpe, comment = line.partition('#')
@@ -120,6 +124,11 @@ def assemble(source):
 	loadLabels(source)
 	source.seek(0)
 
+	# binary header
+	print format(magicNumber, '32b'), format(baseAddress, '32b')
+	print format(stackAddress, '32b'), format(stackSize, '32b')
+	print format(heapAddress, '32b'), format(heapSize, '32b')
+
 	lineNum = 0
 	for line in source:
 		lineNum += 1
@@ -180,7 +189,7 @@ def assemble(source):
 		mode = format(int(mode), '08b')
 
 		# Only one operand is variable and which one differs based on the opcode.
-		# Makes the assembly look ugly, but lets us be compact.
+		# Makes this assembler code look ugly, but lets us have compact binary.
 		if op['var'] == 0:
 			packInstruction(opcode, mode, opr1, opr2, opr0)
 		if op['var'] == 1:
@@ -231,6 +240,18 @@ def main():
 		elif o in ('-d', '--disassemble'):
 			rom = open(a, "r");
 			pass
+
+		elif o in ('-b', '--base-address'):
+			baseAddress = int(a)
+		elif o in ('-s', '--stack-address'):
+			stackAddress = int(a)
+		elif o in ('-z', '--stack-size'):
+			stackSize = int(a)
+		elif o in ('-s', '--heap-address'):
+			heapAddress = int(a)
+		elif o in ('-z', '--heap-size'):
+			heapSize = int(a)
+
 		else:
 			assert False, 'Unhandled option: ' + str(o)
 

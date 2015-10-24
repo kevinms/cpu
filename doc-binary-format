@@ -41,6 +41,8 @@ Field Descriptions:
 Magic Number
 	Set by the assembler.
 	Checked by the kernel to verify this is an executable binary.
+	Valid magic numbers:
+		0xDEADC0DE - Executable Binary Version 1
 
 Base Address
 	Set by the assembler.
@@ -48,15 +50,39 @@ Base Address
 	If zero, the kernel dynamically places it and updates this value
 	to reflect it's actual location.
 	If non-zero, the kernel attempts to place it at the provided
-	address. It fails if it can't.
+	address. It fails, if it can't.
 
 Stack Address
-	Net set by the assembler.
+	Any value set by the assembler is ignored.
 	Set by the kernel.
 
 Stack Size
-	Set by the assembler to request a specific size.
+	Set by the assembler to request a specific stack size.
 	Checked by the kernel to know how large of a stack to allocate.
 	If zero, the kernel will use the default stack size and updates
 	this value with the actual size.
-	If non-zero, 
+	If non-zero, the kernel attempts to allocate a stack of the
+	provided size. It fails, if it can't.
+
+Heap Address
+	Set by the assembler.
+	Checked by the kernel to know if a private or shared heap should
+	be given to the new executable.
+	If zero, the kernel will update this value to reflect the
+	shared heap address.
+	If non-zero, the kernel attemps to allocate a private heap
+	at the provided location. It fails, if it can't.
+
+Heap Size
+	Set by the assembler.
+	Checked by the kernel to know the size of the private heap.
+	If zero, the kernel allocates a shared heap using the default
+	shared heap size.
+	If non-zero, the kernel will use the default shared heap size and
+	updates this value with the actual size.
+
+Checksum
+	Set by the assembler.
+	CRC32 checksum of the binary and all header fields.
+	Checked by the kernel to verify the integrity of the binary.
+
