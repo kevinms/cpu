@@ -8,7 +8,7 @@ alias = {'sp':'r11', 'ba':'r12', 'fl':'r13', 'c1':'r14', 'c2':'r15'}
 
 magicNumber = 0xDEADC0DE
 baseAddress = stackAddress = stackSize = heapAddress = heapSize = 0x0
-
+header = True
 
 def error(msg):
 	print >> sys.stderr, msg
@@ -124,10 +124,11 @@ def assemble(source):
 	loadLabels(source)
 	source.seek(0)
 
-	# binary header
-	print format(magicNumber, '32b'), format(baseAddress, '32b')
-	print format(stackAddress, '32b'), format(stackSize, '32b')
-	print format(heapAddress, '32b'), format(heapSize, '32b')
+	# executable binary header
+	if header is True:
+		print format(magicNumber, '32b'), format(baseAddress, '32b')
+		print format(stackAddress, '32b'), format(stackSize, '32b')
+		print format(heapAddress, '32b'), format(heapSize, '32b')
 
 	lineNum = 0
 	for line in source:
@@ -240,6 +241,9 @@ def main():
 		elif o in ('-d', '--disassemble'):
 			rom = open(a, "r");
 			pass
+
+		elif o in ('-n', '--no-header'):
+			header = False
 
 		elif o in ('-b', '--base-address'):
 			baseAddress = int(a)
