@@ -638,6 +638,20 @@ void parseArgs(int argc, char **argv)
 	}
 }
 
+struct SPI {
+	uint8_t tx, rx;
+};
+
+int SPIsend(uint8_t data)
+{
+	
+}
+
+uint8_t SPIrecv()
+{
+	return(0);
+}
+
 uint32_t getAddress(uint8_t mode, uint32_t offset)
 {
 	if ((mode & MODE_ADDRESS) == ADDR_REL) {
