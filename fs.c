@@ -14,8 +14,9 @@ static struct option longopts[] = {
 	{"image", required_argument, NULL, 'i'},
 	{"new", required_argument, NULL, 'n'},
 	{"ls", no_argument, NULL, 'l'},
-	{"rm", required_argument, NULL, 'r'},
+	{"delete", required_argument, NULL, 'd'},
 	{"add", required_argument, NULL, 'a'},
+	{"read", required_argument, NULL, 'r'},
 	{"scan", no_argument, NULL, 's'},
 	{"help", no_argument, NULL, 'h'}
 };
@@ -24,8 +25,9 @@ char *optdesc[] = {
 	"The disk image file to use.",
 	"Create a new disk image of <imageSize> bytes.",
 	"List contents of disk image.",
-	"Remove file from disk image.",
+	"Delete file from disk image.",
 	"Add file to disk image.",
+	"Read file from disk image and write to STDOUT.",
 	"Scan disk image.",
 	"This help."
 };
@@ -38,8 +40,9 @@ static uint32_t imageSize;
 static char *argFilePath;
 static int cmdNew;
 static int cmdList;
-static int cmdRemove;
+static int cmdDelete;
 static int cmdAdd;
+static int cmdRead;
 static int cmdScan;
 
 void usage(int argc, char **argv)
@@ -93,13 +96,17 @@ void parseArgs(int argc, char **argv)
 			case 'l':
 				cmdList = 1;
 				break;
-			case 'r':
+			case 'd':
 				argFilePath = strdup(optarg);
-				cmdRemove = 1;
+				cmdDelete = 1;
 				break;
 			case 'a':
 				argFilePath = strdup(optarg);
 				cmdAdd = 1;
+				break;
+			case 'r':
+				argFilePath = strdup(optarg);
+				cmdRead = 1;
 				break;
 			case 's':
 				cmdScan = 1;
@@ -341,8 +348,10 @@ int addFile(char *filePath)
 	 * we have a failure.
 	 */
 	void *buffer = ((void *)thisFree) + OBJECT_HEADER;
-	fprintf(stderr, "Writing file at 0x%" PRIX32"\n", (uint32_t)(buffer - mapping));
 	uint32_t bytesLeft = fileSize;
+
+	fprintf(stderr, "Writing file at 0x%" PRIX32"\n", (uint32_t)(buffer - mapping));
+
 	while (bytesLeft > 0) {
 		ssize_t bytesRead;
 
@@ -369,6 +378,7 @@ int addFile(char *filePath)
 
 	thisUsed = thisFree;
 	thisUsed->fileSize = fileSize;
+	strncpy((char *)thisUsed->fileName, filePath, sizeof(thisUsed->fileName) - 1);
 	if (thisUsed->length >= fileSize + OBJECT_OVERHEAD) {
 		uint32_t newFreeOffset;
 		struct trailer *freeTrailer;
@@ -400,22 +410,99 @@ int addFile(char *filePath)
 	return(0);
 }
 
+int deleteFile(char *filePath)
+{
+	return(0);
+}
+
+int readFile(char *filePath)
+{
+	struct superBlock *super = mapping;
+	struct header *thisUsed;
+	uint32_t thisOffset;
+
+	/*
+	 * Traverse all used objects.
+	 */
+	super = mapping;
+	for (thisOffset = super->usedOffset;
+		 thisOffset != 0;
+		 thisOffset = thisUsed->nextOffset) {
+		thisUsed = mapping + thisOffset;
+
+		if (strncmp((char *)thisUsed->fileName, filePath, strlen(filePath)) == 0) {
+			/*
+			 * Found a match -- dump contents to STDOUT.
+			 */
+			void *buffer = ((void *)thisUsed) + OBJECT_HEADER;
+			uint32_t bytesLeft = thisUsed->fileSize;
+
+			while (bytesLeft > 0) {
+				ssize_t bytesWritten;
+
+				if ((bytesWritten = write(STDOUT_FILENO, buffer, bytesLeft)) < 0) {
+					fprintf(stderr, "Can't read %s: %s\n", filePath, strerror(errno));
+					return(-1);
+				}
+
+				bytesLeft -= (uint32_t)bytesWritten;
+				buffer += bytesWritten;
+			}
+		}
+	}
+
+	return(0);
+}
+
+int listFiles()
+{
+	struct superBlock *super = mapping;
+	struct header *thisUsed;
+	uint32_t thisOffset;
+	uint32_t count;
+
+
+	/*
+	 * Traverse all used objects.
+	 */
+	super = mapping;
+	for (thisOffset = super->usedOffset, count = 0;
+		 thisOffset != 0;
+		 thisOffset = thisUsed->nextOffset, ++count) {
+		thisUsed = mapping + thisOffset;
+
+		if (count == 0) {
+			fprintf(stderr, "Bytes     File\n");
+		}
+		fprintf(stderr, "%-10" PRIu32 " %s\n",
+				thisUsed->fileSize, thisUsed->fileName);
+	}
+
+	fprintf(stderr, "%" PRIu32 " files\n", count);
+
+	return(0);
+}
+
 int main(int argc, char **argv) {
 	parseArgs(argc, argv);
 
-	printFileSystemInfo();
+	//printFileSystemInfo();
 	openDiskImage();
 
 	if (cmdList) {
-		
+		listFiles();
 	}
 
-	if (cmdRemove) {
-		
+	if (cmdDelete) {
+		deleteFile(argFilePath);
 	}
 
 	if (cmdAdd) {
 		addFile(argFilePath);
+	}
+
+	if (cmdRead) {
+		readFile(argFilePath);
 	}
 
 	if (cmdScan) {
