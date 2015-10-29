@@ -53,8 +53,8 @@ They are used to keep track of both used and free space.
 | Trailer |
 +---------+
 
-All used objects are connected in a doubly linked list.
-All free objects are connected in another doubly linked list.
+All used objects are connected in a singly linked list.
+All free objects are connected in another singly linked list.
 
                  Free Space
      .----------.---------------------.
@@ -66,16 +66,16 @@ All free objects are connected in another doubly linked list.
                            '---------------------'
                                   Used Space
 
-Each header contains a next and prev offset for the doubly linked list.
+Each header contains a next offset for the singly linked list.
 The length field denotes how much space the object takes up minus the
-size of the header and trailer. The name field is for "used" objects
-and is the file name.
+size of the header and trailer. The fileName field is for "used"
+objects and is the file name.
 
 struct header {
 	uint32_t length;
 	uint32_t nextOffset;
-	uint32_t prevOffset;
-	uint8_t name[64];
+	uint32_t fileSize;
+	uint8_t fileName[64];
 };
 
 Each trailer contains the header offset. This is used to quickly
@@ -100,7 +100,7 @@ free. The object being freed is coalesced with it's neighbors if they
 are also free objects.
 
 To list all files within the filesystem, traverse the used list and
-identify files by the name and length field in each object header.
+identify files by the fileName and fileSize field in each object header.
 
 And, that's it! Interestingly, this scheme was chosen both for it's
 simplicity and similarity to the standard library's dynamic memory
