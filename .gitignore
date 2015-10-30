@@ -1,4 +1,6 @@
 *.[oa]
 *.rom
-cpu-emu
+*.bin
+emulator
+fs
 *.swp

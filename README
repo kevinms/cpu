@@ -7,4 +7,4 @@
 #
 # Run the ROM in the CPU emulator.
 #
-./cpu-emu -r test.rom
+./emulator -r test.rom
