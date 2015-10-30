@@ -89,7 +89,7 @@ struct cpuState {
 
 #define NUM_REGISTERS 16
 uint32_t r[NUM_REGISTERS], pc;
-uint8_t mem[65536];
+uint8_t mem[32*1024*1024];
 
 uint64_t 	ic;
 uint32_t 	nextPC;
@@ -98,8 +98,6 @@ char		msg[4096];
 int			beInteractive = 0;
 uint64_t	maxCycles = UINT64_MAX;
 char		*romFile = NULL;
-char		*blobFile = NULL;
-uint32_t	blobOffset = 0x400;
 
 struct instruction {
 	uint8_t op;
@@ -111,6 +109,14 @@ struct instruction {
 	uint32_t opr0, opr1, opr2;
 };
 
+struct binary {
+	char *filePath;
+	uint32_t memoryOffset;
+	struct binary *next;
+};
+
+struct binary *gBinaryList;
+
 void initEnvironment()
 {
 	memset(mem, 0, sizeof(mem));
@@ -118,35 +124,71 @@ void initEnvironment()
 	pc = 0;
 }
 
-int loadBinaryBlob(char *path, uint32_t offset)
+int addBinary(char *binaryInfo)
+{
+	struct binary *newBinary;
+	char *separator, *path, *offset;
+
+	/*
+	 * Parse path and offset from binaryInfo.
+	 */
+	if (((separator = rindex(binaryInfo, ':')) == NULL) ||
+		(separator == binaryInfo) || (strlen(separator) <= 1)) {
+		fprintf(stderr, "Expected binaryInfo as <filePath>:<memoryOffset>\n");
+		return(-1);
+	}
+	separator[0] = '\0';
+	path = binaryInfo;
+	offset = separator + 1;
+
+	newBinary = malloc(sizeof(*newBinary));
+	newBinary->filePath = strdup(path);
+	newBinary->memoryOffset = strtoull(offset, NULL, 0);
+
+	newBinary->next = gBinaryList;
+	gBinaryList = newBinary;
+
+	return(0);
+}
+
+int loadBinary(struct binary *binary)
 {
 	int		fd;
-	uint8_t	buf[65536];
 	struct stat	statBuffer;
 
-	printf("loading binary blob.\n");
+	printf("Loading %s at 0x%" PRIX32 "\n", binary->filePath, binary->memoryOffset);
 
-	if ((fd = open(path, O_RDONLY)) < 0) {
-		fprintf(stderr, "Can't open %s: %s\n", path, strerror(errno));
+	if ((fd = open(binary->filePath, O_RDONLY)) < 0) {
+		fprintf(stderr, "Can't open %s: %s\n", binary->filePath, strerror(errno));
 		exit(1);
 	}
 
 	if (fstat(fd, &statBuffer) < 0) {
-		fprintf(stderr, "Failed stat(%s,): %s\n", path, strerror(errno));
+		fprintf(stderr, "Failed stat(%s,): %s\n", binary->filePath, strerror(errno));
 		exit(1);
 	}
 
-	if (statBuffer.st_size > sizeof(buf)) {
-		fprintf(stderr, "Blob must be less then or equal to 64 KB.");
+	if ((binary->memoryOffset > sizeof(mem)) ||
+		(statBuffer.st_size > sizeof(mem) - binary->memoryOffset)) {
+		fprintf(stderr, "Binary does not fit in memory.\n");
 		exit(1);
 	}
 
-	memset(buf, 0, sizeof(buf));
-	pread(fd, buf, statBuffer.st_size, 0);
+	void *buffer = ((void *)mem) + binary->memoryOffset;
+	uint32_t bytesLeft = statBuffer.st_size;
 
-	memcpy(mem+offset, buf, statBuffer.st_size);
+	while (bytesLeft > 0) {
+		ssize_t bytesRead;
 
-	printf("%c%c%c%c%c\n", mem[0x400], mem[0x401], mem[0x402], mem[0x403], mem[0x404]);
+		if ((bytesRead = read(fd, buffer, bytesLeft)) < 0) {
+			fprintf(stderr, "Can't read %s: %s\n", binary->filePath, strerror(errno));
+			close(fd);
+			return(-1);
+		}
+
+		bytesLeft -= (uint32_t)bytesRead;
+		buffer += bytesRead;
+	}
 
 	return(0);
 }
@@ -544,8 +586,7 @@ void interactive()
 
 static struct option longopts[] = {
 	{"rom", required_argument, NULL, 'r'},
-	{"blob", required_argument, NULL, 'b'},
-	{"blob-offset", required_argument, NULL, 'o'},
+	{"binary", required_argument, NULL, 'b'},
 	{"max-cycles", required_argument, NULL, 'c'},
 	{"interactive", no_argument, NULL, 'i'},
 	{"starting-pc", no_argument, NULL, 'p'},
@@ -554,8 +595,7 @@ static struct option longopts[] = {
 
 char *optdesc[] = {
 	"The ROM to load into memory.",
-	"A blob to place in memory.",
-	"Where to place the blob in memory.",
+	"A binary to place in memory as <binaryPath>:<memoryOffset>.",
 	"Emulator will exit after N cycles.",
 	"Interactive debugging mode.",
 	"Starting program counter value.",
@@ -609,10 +649,7 @@ void parseArgs(int argc, char **argv)
 				romFile = optarg;
 				break;
 			case 'b':
-				blobFile = optarg;
-				break;
-			case 'o':
-				blobOffset = strtoull(optarg, NULL, 0);
+				addBinary(optarg);
 				break;
 			case 'i':
 				beInteractive = 1;
@@ -632,8 +669,8 @@ void parseArgs(int argc, char **argv)
 		}
 	}
 
-	if (romFile == NULL && blobFile == NULL) {
-		fprintf(stderr, "Expected a ROM or blob file path.\n");
+	if (romFile == NULL && gBinaryList == NULL) {
+		fprintf(stderr, "Expected a ROM or binary file path.\n");
 		exit(1);
 	}
 }
@@ -798,12 +835,21 @@ int main(int argc, char **argv)
 	parseArgs(argc, argv);
 
 	initEnvironment();
-	if (loadROM(romFile) < 0) {
+	if ((romFile != NULL) &&
+		(loadROM(romFile) < 0)) {
 		return(1);
 	}
 
-	if (blobFile != NULL) {
-		loadBinaryBlob(blobFile, blobOffset);
+	if (gBinaryList != NULL) {
+		struct binary *thisBinary;
+
+		for (thisBinary = gBinaryList;
+			 thisBinary != NULL;
+			 thisBinary = thisBinary->next) {
+			if (loadBinary(thisBinary) < 0) {
+				return(1);
+			}
+		}
 	}
 
 	dumpRegisters(1, 0, "");

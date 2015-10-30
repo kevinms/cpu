@@ -29,11 +29,11 @@ def output(msg):
 	if binaryFile is not None:
 		n = int(msg, 2)
 		if len(msg) == 8:
-			binaryFile.write( struct.pack('<B', n) );
+			binaryFile.write( struct.pack('>B', n) );
 		if len(msg) == 16:
-			binaryFile.write( struct.pack('<H', n) );
+			binaryFile.write( struct.pack('>H', n) );
 		if len(msg) == 32:
-			binaryFile.write( struct.pack('<I', n) );
+			binaryFile.write( struct.pack('>I', n) );
 
 	# ASCII Binary File
 	if asciiFile is not None:
