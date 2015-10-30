@@ -681,7 +681,7 @@ struct SPI {
 
 int SPIsend(uint8_t data)
 {
-	
+	return(0);
 }
 
 uint8_t SPIrecv()

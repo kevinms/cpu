@@ -129,7 +129,7 @@ void parseArgs(int argc, char **argv)
 
 struct superBlock {
 	uint32_t magic;
-	uint32_t version;
+	uint32_t size;
 	uint32_t freeOffset;
 	uint32_t usedOffset;
 };
@@ -163,7 +163,7 @@ void printSuperBlock(struct superBlock *super)
 {
 	fprintf(stderr, "Super Block at 0x%" PRIX32 ":\n", (uint32_t)(((void *)super) - mapping));
 	fprintf(stderr, "\tmagic:      0x%" PRIX32 "\n", super->magic);
-	fprintf(stderr, "\tversion:    0x%" PRIX32 "\n", super->version);
+	fprintf(stderr, "\tsize:    0x%" PRIX32 "\n", super->size);
 	fprintf(stderr, "\tfreeOffset: 0x%" PRIX32 "\n", super->freeOffset);
 	fprintf(stderr, "\tusedOffset: 0x%" PRIX32 "\n", super->usedOffset);
 }
@@ -276,7 +276,7 @@ int openDiskImage()
 		trailer = mapping + (imageSize - OBJECT_TRAILER);
 
 		super->magic = 0x42;
-		super->version = 0x1;
+		super->size = imageSize;
 		super->freeOffset = OBJECT_SUPER;
 		super->usedOffset = 0;
 
