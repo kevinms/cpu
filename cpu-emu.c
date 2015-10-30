@@ -632,8 +632,8 @@ void parseArgs(int argc, char **argv)
 		}
 	}
 
-	if (romFile == NULL) {
-		fprintf(stderr, "Expected a ROM file path.\n");
+	if (romFile == NULL && blobFile == NULL) {
+		fprintf(stderr, "Expected a ROM or blob file path.\n");
 		exit(1);
 	}
 }

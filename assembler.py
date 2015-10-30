@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import getopt, sys, re
+import struct
 
 iset = {}   # instruction set
 labels = {} # label table
@@ -8,13 +9,35 @@ alias = {'sp':'r11', 'ba':'r12', 'fl':'r13', 'c1':'r14', 'c2':'r15'}
 
 magicNumber = 0xDEADC0DE
 baseAddress = stackAddress = stackSize = heapAddress = heapSize = 0x0
-header = True
+header = False
+
+doAssemble = False
+binaryFile = None
+asciiFile = None
 
 def error(msg):
 	print >> sys.stderr, msg
 	sys.exit(1)
 def debug(msg):
 	print >> sys.stderr, msg
+
+def output(msg):
+	# ASCII Binary STDOUT
+	print msg
+
+	# Binary File
+	if binaryFile is not None:
+		n = int(msg, 2)
+		if len(msg) == 8:
+			binaryFile.write( struct.pack('<B', n) );
+		if len(msg) == 16:
+			binaryFile.write( struct.pack('<H', n) );
+		if len(msg) == 32:
+			binaryFile.write( struct.pack('<I', n) );
+
+	# ASCII Binary File
+	if asciiFile is not None:
+		asciiFile.write(msg+'\n');
 
 def parseISA():
 	parse = 0
@@ -149,11 +172,11 @@ def assemble(source):
 
 		if i == 'w':
 			opr0, m0, a0 = parseOperand(args[0], 'c', lineNum, '032b')
-			print opr0
+			output(opr0)
 			continue;
 		if i == 'b':
 			opr0, m0, a0 = parseOperand(args[0], 'c', lineNum, '08b')
-			print opr0
+			output(opr0)
 			continue;
 
 		op = iset[i]
@@ -205,12 +228,20 @@ def packInstruction(opcode, mode, opr0, opr1, opr2):
 		opr1 = format(0, '08b')
 	if opr2 is None:
 		opr2 = format(0, '032b')
-	print opcode, mode, opr0, opr1, opr2
+
+	output(opcode)
+	output(mode)
+	output(opr0)
+	output(opr1)
+	output(opr2)
+	#print opcode, mode, opr0, opr1, opr2
 
 options = [
 	('h','help','This help.'),
 	('a:','assemble=','Translate assembly language into machine code.'),
-	('d:','disassemble=','Translate machine code into assembly language.')]
+	('d:','disassemble=','Translate machine code into assembly language.'),
+	('b:','binary=','Output machine code to binary file.'),
+	('t:','text=','Output machine code to ascii binary file.')]
 shortOpt = "".join([opt[0] for opt in options])
 longOpt = [opt[1] for opt in options]
 
@@ -222,8 +253,9 @@ def usage():
 		print fmt%(opt[0][0], opt[1], opt[2])
 	sys.exit(1)
 
-
 def main():
+	global binaryFile, asciiFile
+
 	try:
 		opts, args = getopt.getopt(sys.argv[1:], shortOpt, longOpt)
 	except getopt.GetoptError as err:
@@ -236,14 +268,21 @@ def main():
 		if o in ('-h', '--help'):
 			usage()
 		elif o in ('-a', '--assemble'):
+			#inFile = os.path.basename(a)
+			#base = os.path.splitext(inFile)[0]
+			#asciiFile = base + '.rom'
+			#binaryFile = base + '.bin'
 			source = open(a, "r")
-			assemble(source)
+			doAssemble = True
 		elif o in ('-d', '--disassemble'):
 			rom = open(a, "r");
-			pass
 
-		elif o in ('-n', '--no-header'):
-			header = False
+		elif o in ('-b', '--binary'):
+			binaryFile = open(a, "wb")
+			if binaryFile is not None:
+				print "Using binary file " + a
+		elif o in ('-t', '--text'):
+			asciiFile = open(a, "w")
 
 		elif o in ('-b', '--base-address'):
 			baseAddress = int(a)
@@ -258,6 +297,9 @@ def main():
 
 		else:
 			assert False, 'Unhandled option: ' + str(o)
+
+	if doAssemble:
+		assemble(source)
 
 if __name__ == "__main__":
 	main()
