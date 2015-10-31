@@ -89,7 +89,7 @@ struct cpuState {
 
 #define NUM_REGISTERS 16
 uint32_t r[NUM_REGISTERS], pc;
-uint8_t mem[32*1024*1024];
+uint8_t mem[32*1024*1024] = {0};
 
 uint64_t 	ic;
 uint32_t 	nextPC;
@@ -1014,6 +1014,7 @@ int main(int argc, char **argv)
 			break;
 		default:
 			fprintf(stderr, "Unknown opcode: %" PRIu32 "\n", o.op);
+			stop = 1;
 			break;
 		}
 		dumpRegisters(0, nextPC, msg);

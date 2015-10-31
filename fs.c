@@ -487,7 +487,10 @@ int main(int argc, char **argv) {
 	parseArgs(argc, argv);
 
 	//printFileSystemInfo();
-	openDiskImage();
+	if (openDiskImage() < 0) {
+		fprintf(stderr, "Can't open disk image.\n");
+		return(1);
+	}
 
 	if (cmdList) {
 		listFiles();

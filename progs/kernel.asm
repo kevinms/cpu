@@ -23,6 +23,10 @@
 ; Need space for a binary and it's stack? malloc
 ; Only the Kernel and Standard Lib would have a static location.
 
+mov r0 1
+mov r1 1
+add r2 r0 r1
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Create a new task structure.
 ; Allocate memory for the binary and it's stack.

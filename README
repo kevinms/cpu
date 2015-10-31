@@ -2,9 +2,14 @@
 #
 # Build a ROM file from assembly code.
 #
-./assembler.py --assemble test.asm > test.rom
+./assembler.py --assemble test.asm -b test.bin > test.rom
 
 #
-# Run the ROM in the CPU emulator.
+# Run the ROM in the emulator.
 #
 ./emulator -r test.rom
+
+#
+# Run the kernel in the emulator.
+#
+./emulator -b progs/bios.bin:0x4000 -b sd.img:0x5000
