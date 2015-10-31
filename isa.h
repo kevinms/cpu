@@ -26,8 +26,8 @@
 #define OPR_REG      0b1 // Register Direct
 
 #define MODE_ADDRESS 0b00000010
-#define ADDR_ABS     0b00 // Offset
-#define ADDR_REL     0b10 // Base + Offset
+#define ADDR_REL     0b00 // Base + Offset
+#define ADDR_ABS     0b10 // Offset
 
 // Instruction Op Codes
 #define nop  0b00000000

@@ -210,7 +210,6 @@ def assemble(source):
 
 		mode = (mode | (absolute << 1))
 		mode = format(int(mode), '08b')
-
 		# Only one operand is variable and which one differs based on the opcode.
 		# Makes this assembler code look ugly, but lets us have compact binary.
 		if op['var'] == 0:

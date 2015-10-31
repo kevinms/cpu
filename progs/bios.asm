@@ -29,7 +29,6 @@ stw sp ._ra1
 jmp .SDread
 ._ra1
 
-
 ;
 ; Copy kernel into main memory.
 ;

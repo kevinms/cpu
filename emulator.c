@@ -731,17 +731,13 @@ uint32_t *mmapIOregister(uint32_t address)
 	return(NULL);
 }
 
-uint8_t read8bit(uint8_t mode, uint32_t offset)
+uint8_t read8bit(uint32_t address)
 {
-	uint32_t address = getAddress(mode, offset);
-
 	return mem[address];
 }
 
-uint32_t read32bit(uint8_t mode, uint32_t offset)
+uint32_t read32bit(uint32_t address)
 {
-	uint32_t address = getAddress(mode, offset);
-
 	if (address < mmapIOstart || address >= mmapIOend) {
 		/*
 		 * Normal memory access.
@@ -764,17 +760,13 @@ uint32_t read32bit(uint8_t mode, uint32_t offset)
 	return(*reg);
 }
 
-void write8bit(uint8_t mode, uint32_t offset, uint8_t data)
+void write8bit(uint32_t address, uint8_t data)
 {
-	uint32_t address = getAddress(mode, offset);
-
 	mem[address] = data;
 }
 
-void write32bit(uint8_t mode, uint32_t offset, uint32_t data)
+void write32bit(uint32_t address, uint32_t data)
 {
-	uint32_t address = getAddress(mode, offset);
-
 	if (address < mmapIOstart || address >= mmapIOend) {
 		/*
 		 * Normal memory access.
@@ -802,6 +794,7 @@ int main(int argc, char **argv)
 {
 	int			stop;
 	struct instruction o;
+	uint32_t address;
 
 	parseArgs(argc, argv);
 
@@ -883,20 +876,24 @@ int main(int argc, char **argv)
 		 * Load and stores.
 		 */
 		case ldb:
-			log("ldb r[%" PRIu32 "] = mem[%" PRIu32 "]", o.reg0, o.opr2);
-			r[o.reg0] = read8bit(o.mode, o.opr2);
+			address = getAddress(o.mode, o.opr2);
+			log("ldb r[%" PRIu32 "] = mem[%" PRIu32 "]", o.reg0, address);
+			r[o.reg0] = read8bit(address);
 			break;
 		case ldw:
-			log("ldw r[%" PRIu32 "] = mem[%" PRIu32 "]", o.reg0, o.opr2);
-			r[o.reg0] = read32bit(o.mode, o.opr2);
+			address = getAddress(o.mode, o.opr2);
+			log("ldw r[%" PRIu32 "] = mem[%" PRIu32 "]", o.reg0, address);
+			r[o.reg0] = read32bit(address);
 			break;
 		case stb:
-			log("stb mem[%" PRIu32 "] = %" PRIu32, o.opr0, o.opr2);
-			write8bit(o.mode, o.opr0, (uint8_t)o.opr2);
+			address = getAddress(o.mode, o.opr0);
+			log("stb mem[%" PRIu32 "] = %" PRIu32, address, o.opr2);
+			write8bit(address, (uint8_t)o.opr2);
 			break;
 		case stw:
-			log("stw mem[%" PRIu32 "] = %" PRIu32, o.opr0, o.opr2);
-			write32bit(o.mode, o.opr0, o.opr2);
+			address = getAddress(o.mode, o.opr0);
+			log("stw mem[%" PRIu32 "] = %" PRIu32, address, o.opr2);
+			write32bit(address, o.opr2);
 			break;
 		case mov:
 			log("mov r[%" PRIu32 "] = %" PRIu32, o.reg0, o.opr2);
@@ -935,46 +932,53 @@ int main(int argc, char **argv)
 		 * Branches and jumps.
 		 */
 		case bez:
-			log("bez %" PRIu32 " %" PRIu32 " == 0", o.opr2, o.opr0);
+			address = getAddress(o.mode, o.opr2);
+			log("bez %" PRIu32 " %" PRIu32 " == 0", address, o.opr0);
 			if (o.opr0 == 0) {
-				nextPC = getAddress(o.mode, o.opr2);
+				nextPC = address;
 				R_FL |= FL_Z;
 			}
 			break;
 		case bnz:
-			log("bnz %" PRIu32 " %" PRIu32 " == 0", o.opr2, o.opr0);
+			address = getAddress(o.mode, o.opr2);
+			log("bnz %" PRIu32 " %" PRIu32 " == 0", address, o.opr0);
 			if (o.opr0 != 0) {
-				nextPC = getAddress(o.mode, o.opr2);
+				nextPC = address;
 				R_FL &= ~FL_Z;
 			}
 			break;
 		case ble:
-			log("ble %" PRIu32 " %" PRIu32 " <= 0", o.opr2, o.opr0);
+			address = getAddress(o.mode, o.opr2);
+			log("ble %" PRIu32 " %" PRIu32 " <= 0", address, o.opr0);
 			if (o.opr0 <= 0) {
-				nextPC = getAddress(o.mode, o.opr2);
+				nextPC = address;
 			}
 			break;
 		case bge:
-			log("bge %" PRIu32 " %" PRIu32 " >= 0", o.opr2, o.opr0);
+			address = getAddress(o.mode, o.opr2);
+			log("bge %" PRIu32 " %" PRIu32 " >= 0", address, o.opr0);
 			if (o.opr0 >= 0) {
-				nextPC = getAddress(o.mode, o.opr2);
+				nextPC = address;
 			}
 			break;
 		case bne:
-			log("bne %" PRIu32 " %" PRIu32 " != %" PRIu32, o.opr2, o.opr0, o.opr1);
+			address = getAddress(o.mode, o.opr2);
+			log("bne %" PRIu32 " %" PRIu32 " != %" PRIu32, address, o.opr0, o.opr1);
 			if (o.opr0 != o.opr1) {
-				nextPC = getAddress(o.mode, o.opr2);
+				nextPC = address;
 			}
 			break;
 		case beq: break;
-			log("beq %" PRIu32 " %" PRIu32 " == %" PRIu32, o.opr2, o.opr0, o.opr1);
+			address = getAddress(o.mode, o.opr2);
+			log("beq %" PRIu32 " %" PRIu32 " == %" PRIu32, address, o.opr0, o.opr1);
 			if (o.opr0 == o.opr1) {
-				nextPC = getAddress(o.mode, o.opr2);
+				nextPC = address;
 			}
 			break;
 		case jmp:
-			log("jmp %" PRIu32, o.opr2);
-			nextPC = getAddress(o.mode, o.opr2);
+			address = getAddress(o.mode, o.opr2);
+			log("jmp %" PRIu32, address);
+			nextPC = address;
 			break;
 
 		/*
