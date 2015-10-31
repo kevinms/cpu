@@ -6,6 +6,7 @@
 ;
 
 ; initialize the stack
+mov ba 0x4000
 mov sp .stack+0xFFFF
 
 ;
@@ -37,9 +38,9 @@ mov r1 0x0  ; source address (SD card)
 add sp sp 4
 ldw r2 sp   ; count (kernel size on stack)
 sub sp sp 4
-stw sp ._ra1
+stw sp ._ra2
 jmp .SDread
-._ra1
+._ra2
 
 ;
 ; Transfer control to the kernel.

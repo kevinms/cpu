@@ -128,7 +128,6 @@ def parseOperand(opr, modes, line, bits):
 		if plus:
 			offset = int(number, 0)
 		opr = str(labels[label[1:]] + offset)
-		#return format(labels[opr[1:]], bits), modebit, absolute
 	if opr[0] == 'r':
 		if 'r' not in modes:
 			error('line '+str(line)+': Operand does not support register direct mode.')

@@ -36,36 +36,6 @@
 
 /*
  * Memory Mapped I/O:
- *
- * 0x0  +--------------------------+
- *      | Global Interrupt Control |
- * 0x4  +--------------------------+
- *      | Pending Interrupts       |
- * 0x8  +--------------------------+
- * 	    | Per-Interrupt Control    |
- * 0xC  +--------------------------+
- * 	    | Interrupt Handler Vector |
- * 	    | .                        |
- * 	    | .                        |
- * 	    | .                        |
- * 0x8C +--------------------------+
- * 	    | Timer 1 Terminal Count   |
- * 0x90 +--------------------------+
- * 	    | Timer 1 Control          |
- * 0x94 +--------------------------+
- * 	    | Timer 2 Terminal Count   |
- * 0x98 +--------------------------+
- * 	    | Timer 2 Control          |
- * 0x9C +--------------------------+
- * 	    | SPI Control              |
- *      +--------------------------+
- * 	    | SPI Input                |
- *      +--------------------------+
- * 	    | SPI Output               |
- *      +--------------------------+
- * 	    | .                        |
- * 	    | .                        |
- * 	    | .                        |
  */
 uint32_t mmapIOstart = 0;
 uint32_t mmapIOend = 0; //0x9C
@@ -589,7 +559,7 @@ static struct option longopts[] = {
 	{"binary", required_argument, NULL, 'b'},
 	{"max-cycles", required_argument, NULL, 'c'},
 	{"interactive", no_argument, NULL, 'i'},
-	{"starting-pc", no_argument, NULL, 'p'},
+	{"starting-pc", required_argument, NULL, 'p'},
 	{"help", no_argument, NULL, 'h'}
 };
 
@@ -598,7 +568,7 @@ char *optdesc[] = {
 	"A binary to place in memory as <binaryPath>:<memoryOffset>.",
 	"Emulator will exit after N cycles.",
 	"Interactive debugging mode.",
-	"Starting program counter value.",
+	"Starting program counter value as <memoryOffset>.",
 	"This help."
 };
 
@@ -659,6 +629,7 @@ void parseArgs(int argc, char **argv)
 				break;
 			case 'p':
 				startingPC = strtoull(optarg, NULL, 0);
+				break;
 			case 'h':
 				usage(argc, argv);
 				break;
@@ -852,11 +823,12 @@ int main(int argc, char **argv)
 		}
 	}
 
-	dumpRegisters(1, 0, "");
-
 	ic = 0;
 	pc = startingPC;
 	stop = 0;
+
+	dumpRegisters(1, 0, "");
+
 	while (!stop && (maxCycles-- > 0)) {
 
 		interactive();
