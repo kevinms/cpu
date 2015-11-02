@@ -1,6 +1,6 @@
 #######################################################################
 #
-# TODO
+# The Road To Hardware
 #
 #######################################################################
 
@@ -9,7 +9,12 @@ Decide whether the emulator prints decimal or hex numbers.
 Whatever endianess is decided upon, needs to be enforced in the
 emulator, assembler and fs utilities.
 
-Implement the SD card library and possibly use it in the BIOS.
+DONE - Option for assembler to begin PC at certain value.
+       The --base-address option was added to the assembler for this.
+
+Assembler should export labels to ABI file so others can reference it.
+
+Implement the FS library and possibly use it in the BIOS.
 
 Determine sane offsets/sizes for the memory layout. I.e. placement and
 size of kernel, kernel's stack, mmap I/O region, standard library, etc.

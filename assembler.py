@@ -21,7 +21,7 @@ def error(msg):
 def debug(msg):
 	print >> sys.stderr, msg
 
-def output(msg, trailer):
+def output(msg, trailer = ' '):
 	# ASCII Binary STDOUT
 	sys.stdout.write(msg + trailer)
 
@@ -114,7 +114,6 @@ def parseOperand(opr, modes, line, bits):
 	modebit = 0
 	absolute = 0
 	if opr[0] == '@':
-		debug("Found ampersand")
 		if '@' not in modes:
 			error('line '+str(line)+': Operand does not support absolute addressing '+str(opr))
 		absolute = 1
@@ -150,11 +149,11 @@ def assemble(source):
 	# executable binary header
 	if header is True:
 		output(format(magicNumber, '032b'))
-		output(format(baseAddress, '032b'))
+		output(format(baseAddress, '032b'), '\n')
 		output(format(stackAddress, '032b'))
-		output(format(stackSize, '032b'))
+		output(format(stackSize, '032b'), '\n')
 		output(format(heapAddress, '032b'))
-		output(format(heapSize, '032b'))
+		output(format(heapSize, '032b'), '\n')
 
 	lineNum = 0
 	for line in source:
@@ -208,9 +207,6 @@ def assemble(source):
 			sys.exit(1)
 
 		absolute = a0+a1+a2
-		if absolute == 1:
-			debug("absolute <-------------------- #########################")
-			print "absolute <-------------------- #########################"
 		if absolute > 1:
 			error('line '+str(lineNum)+': Only one operand can use absolute addressing:'+str(a0)+str(a1)+str(a2))
 			sys.exit(1)
@@ -234,10 +230,10 @@ def packInstruction(opcode, mode, opr0, opr1, opr2):
 	if opr2 is None:
 		opr2 = format(0, '032b')
 
-	output(opcode, ' ')
-	output(mode, ' ')
-	output(opr0, ' ')
-	output(opr1, ' ')
+	output(opcode)
+	output(mode)
+	output(opr0)
+	output(opr1)
 	output(opr2, '\n')
 
 options = [
@@ -246,6 +242,7 @@ options = [
 	('d:','disassemble=','Translate machine code into assembly language.'),
 	('b:','binary=','Output machine code to binary file.'),
 	('t:','text=','Output machine code to ascii binary file.')]
+	('s:','base-address=','Base address where the binary will start in memory.')]
 shortOpt = "".join([opt[0] for opt in options])
 longOpt = [opt[1] for opt in options]
 
@@ -288,13 +285,15 @@ def main():
 		elif o in ('-t', '--text'):
 			asciiFile = open(a, "w")
 
-		elif o in ('-b', '--base-address'):
+		elif o in ('-s', '--base-address'):
 			baseAddress = int(a)
+
+		#TODO: finish implementing header info
 		elif o in ('-s', '--stack-address'):
 			stackAddress = int(a)
 		elif o in ('-z', '--stack-size'):
 			stackSize = int(a)
-		elif o in ('-s', '--heap-address'):
+		elif o in ('-p', '--heap-address'):
 			heapAddress = int(a)
 		elif o in ('-z', '--heap-size'):
 			heapSize = int(a)
