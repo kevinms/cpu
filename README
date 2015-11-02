@@ -12,4 +12,4 @@
 #
 # Run the kernel in the emulator.
 #
-./emulator -b progs/bios.bin:0x4000 -b sd.img:0x5000
+./emulator -b progs/bios.bin:0x4000 -b sd.img:0x5000 -p 0x4000 -i

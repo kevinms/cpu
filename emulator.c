@@ -87,6 +87,40 @@ struct binary {
 
 struct binary *gBinaryList;
 
+#define byteSwap16(x) \
+	((((x) & 0xFF) << 8) | \
+	 (((x) & 0xFF00) >> 8))
+
+#define byteSwap32(x) \
+	((((x) & 0xFF) << 24) | \
+	 (((x) & 0xFF00) << 8) | \
+	 (((x) & 0xFF0000) >> 8) | \
+	 (((x) & 0xFF000000) >> 24))
+
+uint16_t littleToHost16(uint16_t x)
+{
+	x = byteSwap16(x);
+	return ntohs(x);
+}
+
+uint16_t hostToLittle16(uint16_t x)
+{
+	x = htons(x);
+	return byteSwap16(x);
+}
+
+uint32_t littleToHost32(uint32_t x)
+{
+	x = byteSwap32(x);
+	return ntohl(x);
+}
+
+uint32_t hostToLittle32(uint32_t x)
+{
+	x = htonl(x);
+	return byteSwap32(x);
+}
+
 void initEnvironment()
 {
 	memset(mem, 0, sizeof(mem));
@@ -170,12 +204,12 @@ void parse8bit(char *bits, uint8_t *memory)
 
 void parse16bit(char *bits, uint8_t *memory)
 {
-	*(uint32_t *)memory = htons((uint32_t)strtoul(bits, NULL, 2));
+	*(uint32_t *)memory = hostToLittle16((uint32_t)strtoul(bits, NULL, 2));
 }
 
 void parse32bit(char *bits, uint8_t *memory)
 {
-	*(uint32_t *)memory = htonl((uint32_t)strtoul(bits, NULL, 2));
+	*(uint32_t *)memory = hostToLittle32((uint32_t)strtoul(bits, NULL, 2));
 }
 
 int loadROM(char *path)
@@ -229,7 +263,7 @@ fetchInst(uint32_t lpc, struct instruction *o)
 	o->mode = i[1];
 	o->reg0 = i[2];
 	o->reg1 = i[3];
-	o->raw2 = ntohl(*(uint32_t *)(i + 4));
+	o->raw2 = littleToHost32(*(uint32_t *)(i + 4));
 
 	/*
 	 * Set final operand values based on address mode.
@@ -347,13 +381,12 @@ void deleteBreakpoint(uint64_t n)
 {
 	struct breakpoint *bp;
 	struct breakpoint *prev;
-	uint64_t i;
 
-	for (bp = bp_list, i = 0, prev = NULL;
+	for (bp = bp_list, prev = NULL;
 		 bp != NULL;
-		 prev = bp, bp = bp->next, ++i) {
-		if (i == n) {
-			printf("Deleting breakpoint #%" PRIu64 "\n", i);
+		 prev = bp, bp = bp->next) {
+		if (bp->id == n) {
+			printf("Deleting breakpoint #%" PRIu64 "\n", bp->id);
 			if (prev == NULL) {
 				bp_list = bp->next;
 			} else {
@@ -367,15 +400,8 @@ void deleteBreakpoint(uint64_t n)
 
 void deleteAllBreakpoints()
 {
-	struct breakpoint *bp;
-	uint64_t i;
-
-	for (bp = bp_list, i = 0;
-		 bp != NULL;
-		 bp = bp->next, ++i);
-
-	while (i-- > 0) {
-		deleteBreakpoint(i);
+	while (bp_list != NULL) {
+		deleteBreakpoint(bp_list->id);
 	}
 }
 
@@ -431,7 +457,7 @@ int hitBreakpoint()
 			fetchInst(pc, &o);
 
 			if ((o.op == jmp) && ((o.mode & MODE_OPERAND) == OPR_REG) && (o.raw2 == 4)) {
-				printf("Hit breakpoint #%" PRIu64 ": jmp r8\n", i);
+				printf("Hit breakpoint #%" PRIu64 ": jmp r4\n", i);
 				hitBP = bp;
 			}
 			break;
@@ -466,7 +492,7 @@ void interactive()
 	char	cmd[4096];
 	char	opt1[4096];
 	char	opt2[4096];
-	char	savedInput[4096];
+	static char	savedInput[4096] = "s";
 	uint64_t num;
 	static int keepGoing;
 
@@ -482,8 +508,6 @@ void interactive()
 		return;
 	}
 
-	strcpy(savedInput, "s");
-
 	printf("#> ");
 
 	while (fgets(input, 4096, stdin) != NULL) {
@@ -496,7 +520,7 @@ void interactive()
 			(savedInput[0] != '\0')) {
 			strncpy(input, savedInput, 4096);
 		}
-		if (input[0] == 's') {
+		if (input[0] == 's' || input[0] == 'n') {
 			break;
 		}
 		if (input[0] == 'c') {
@@ -877,23 +901,23 @@ int main(int argc, char **argv)
 		 */
 		case ldb:
 			address = getAddress(o.mode, o.opr2);
-			log("ldb r[%" PRIu32 "] = mem[%" PRIu32 "]", o.reg0, address);
+			log("ldb r[%" PRIu32 "] = mem[%" PRIX32 "]", o.reg0, address);
 			r[o.reg0] = read8bit(address);
 			break;
 		case ldw:
 			address = getAddress(o.mode, o.opr2);
-			log("ldw r[%" PRIu32 "] = mem[%" PRIu32 "]", o.reg0, address);
-			r[o.reg0] = read32bit(address);
+			log("ldw r[%" PRIu32 "] = mem[%" PRIX32 "]", o.reg0, address);
+			r[o.reg0] = littleToHost32(read32bit(address));
 			break;
 		case stb:
 			address = getAddress(o.mode, o.opr0);
-			log("stb mem[%" PRIu32 "] = %" PRIu32, address, o.opr2);
+			log("stb mem[%" PRIX32 "] = %" PRIu32, address, o.opr2);
 			write8bit(address, (uint8_t)o.opr2);
 			break;
 		case stw:
 			address = getAddress(o.mode, o.opr0);
-			log("stw mem[%" PRIu32 "] = %" PRIu32, address, o.opr2);
-			write32bit(address, o.opr2);
+			log("stw mem[%" PRIX32 "] = %" PRIu32, address, o.opr2);
+			write32bit(address, hostToLittle32(o.opr2));
 			break;
 		case mov:
 			log("mov r[%" PRIu32 "] = %" PRIu32, o.reg0, o.opr2);

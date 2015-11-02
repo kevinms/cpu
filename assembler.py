@@ -21,23 +21,23 @@ def error(msg):
 def debug(msg):
 	print >> sys.stderr, msg
 
-def output(msg):
+def output(msg, trailer):
 	# ASCII Binary STDOUT
-	print msg
+	sys.stdout.write(msg + trailer)
 
 	# Binary File
 	if binaryFile is not None:
 		n = int(msg, 2)
 		if len(msg) == 8:
-			binaryFile.write( struct.pack('>B', n) );
+			binaryFile.write( struct.pack('<B', n) );
 		if len(msg) == 16:
-			binaryFile.write( struct.pack('>H', n) );
+			binaryFile.write( struct.pack('<H', n) );
 		if len(msg) == 32:
-			binaryFile.write( struct.pack('>I', n) );
+			binaryFile.write( struct.pack('<I', n) );
 
 	# ASCII Binary File
 	if asciiFile is not None:
-		asciiFile.write(msg+'\n');
+		asciiFile.write(msg + trailer);
 
 def parseISA():
 	parse = 0
@@ -60,7 +60,7 @@ def parseISA():
 
 		i = code.split()
 		o = comment.split()
-		#print i, o
+		#debug(i, o)
 
 		op = { 'opcode': "", 'operands': 0, 'var': 0, 'opr0': "", 'opr1': "", 'opr2': "" }
 		op['opcode'] = i[2][2:]
@@ -75,12 +75,12 @@ def parseISA():
 		if len(o) > 3:
 			op['opr2'] = ''.join(re.search('\[(.*?)\]', o[3]).group(1).split(','))
 
-		#print op
+		#debug(op)
 
 		iset[i[1]] = op
 
 	#for i in iset:
-	#	print i, iset[i]
+	#	debug(i, iset[i])
 
 def loadLabels(source):
 	lineNum = 0
@@ -114,6 +114,7 @@ def parseOperand(opr, modes, line, bits):
 	modebit = 0
 	absolute = 0
 	if opr[0] == '@':
+		debug("Found ampersand")
 		if '@' not in modes:
 			error('line '+str(line)+': Operand does not support absolute addressing '+str(opr))
 		absolute = 1
@@ -148,9 +149,12 @@ def assemble(source):
 
 	# executable binary header
 	if header is True:
-		print format(magicNumber, '32b'), format(baseAddress, '32b')
-		print format(stackAddress, '32b'), format(stackSize, '32b')
-		print format(heapAddress, '32b'), format(heapSize, '32b')
+		output(format(magicNumber, '032b'))
+		output(format(baseAddress, '032b'))
+		output(format(stackAddress, '032b'))
+		output(format(stackSize, '032b'))
+		output(format(heapAddress, '032b'))
+		output(format(heapSize, '032b'))
 
 	lineNum = 0
 	for line in source:
@@ -171,11 +175,11 @@ def assemble(source):
 
 		if i == 'w':
 			opr0, m0, a0 = parseOperand(args[0], 'c', lineNum, '032b')
-			output(opr0)
+			output(opr0, '\n')
 			continue;
 		if i == 'b':
 			opr0, m0, a0 = parseOperand(args[0], 'c', lineNum, '08b')
-			output(opr0)
+			output(opr0, '\n')
 			continue;
 
 		op = iset[i]
@@ -188,8 +192,8 @@ def assemble(source):
 			error('line '+str(lineNum)+': Expected '+str(op['operands'])+' operands but found '+str(len(args)))
 			sys.exit(1)
 
-		#print op
-		#print args
+		#debug(op)
+		#debug(args)
 
 		if len(args) > 0:
 			opr0, m0, a0 = parseOperand(args[0], op['opr0'], lineNum, '032b' if op['var'] == 0 else '08b')
@@ -204,6 +208,9 @@ def assemble(source):
 			sys.exit(1)
 
 		absolute = a0+a1+a2
+		if absolute == 1:
+			debug("absolute <-------------------- #########################")
+			print "absolute <-------------------- #########################"
 		if absolute > 1:
 			error('line '+str(lineNum)+': Only one operand can use absolute addressing:'+str(a0)+str(a1)+str(a2))
 			sys.exit(1)
@@ -227,12 +234,11 @@ def packInstruction(opcode, mode, opr0, opr1, opr2):
 	if opr2 is None:
 		opr2 = format(0, '032b')
 
-	output(opcode)
-	output(mode)
-	output(opr0)
-	output(opr1)
-	output(opr2)
-	#print opcode, mode, opr0, opr1, opr2
+	output(opcode, ' ')
+	output(mode, ' ')
+	output(opr0, ' ')
+	output(opr1, ' ')
+	output(opr2, '\n')
 
 options = [
 	('h','help','This help.'),
@@ -246,9 +252,9 @@ longOpt = [opt[1] for opt in options]
 def usage():
 	pad = str(len(max(longOpt, key=len)))
 	fmt = '  -%s, --%-'+pad+'s : %s'
-	print 'Usage: '+sys.argv[0]+' [options]\n'
+	debug('Usage: '+sys.argv[0]+' [options]\n')
 	for opt in options:
-		print fmt%(opt[0][0], opt[1], opt[2])
+		debug(fmt%(opt[0][0], opt[1], opt[2]))
 	sys.exit(1)
 
 def main():
@@ -257,7 +263,7 @@ def main():
 	try:
 		opts, args = getopt.getopt(sys.argv[1:], shortOpt, longOpt)
 	except getopt.GetoptError as err:
-		print str(err)
+		debug(str(err))
 		usage()
 
 	parseISA()
@@ -278,7 +284,7 @@ def main():
 		elif o in ('-b', '--binary'):
 			binaryFile = open(a, "wb")
 			if binaryFile is not None:
-				print "Using binary file " + a
+				debug("Using binary file " + a)
 		elif o in ('-t', '--text'):
 			asciiFile = open(a, "w")
 
