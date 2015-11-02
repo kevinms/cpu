@@ -1,0 +1,30 @@
+#######################################################################
+#
+# TODO
+#
+#######################################################################
+
+Decide whether the emulator prints decimal or hex numbers.
+
+Whatever endianess is decided upon, needs to be enforced in the
+emulator, assembler and fs utilities.
+
+Implement the SD card library and possibly use it in the BIOS.
+
+Determine sane offsets/sizes for the memory layout. I.e. placement and
+size of kernel, kernel's stack, mmap I/O region, standard library, etc.
+
+Implement malloc and free in the standard library.
+
+Kernel should use malloc and free to spawn new tasks.
+
+Finish interrupt implementation in the emulator and add a task switcher
+interrupt handler to the kernel.
+
+Figure out exactly how SPI will work.
+
+Port to a microcontroller to begin testing with real peripherals.
+
+Pick LCD and figure out an SPI interface.
+
+Begin hardware implementation.

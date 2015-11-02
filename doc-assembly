@@ -1,0 +1,45 @@
+#######################################################################
+#
+# Assembly Language (and pseudo-instructions)
+#
+#######################################################################
+
+#######################################################################
+# Instructions
+
+
+#######################################################################
+# Labels
+
+Labels can be defined and referenced.
+
+To define a label, start a line with the following notation:
+
+	.<label>
+
+The assembler will derive the actualy numerical value of the label.
+
+To define a label to have a specific numerical value, use the above
+notation followed by a numerical value.
+
+	.<label> <number>
+	
+To reference a label, use it in place of numerical values. For example,
+instead of jumping to a function using it's numerical offset:
+
+	jmp 0x1234
+
+a label may be referenced:
+
+	jmp .foo
+
+A label plus offset notation is also valid. For example, one might
+label a lookup table and then reference an offset into it:
+
+	ldw .table+<number>
+
+#######################################################################
+# Pseudo-Instructions
+
+	w <number>
+	b <number>
