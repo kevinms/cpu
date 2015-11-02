@@ -9,16 +9,18 @@
 .kstack	0x1000
 .mmapIO 0x2000
 .stdlib 0x3000
-.bios	0x10000
+.bios	0x4000
 
-.sd_kernel_size 0x18
 .sd_kernel_data 0x5C
-.sd_stdlib_size 0x0
 
+.fs_super_size		0x10
+.fs_header_size		0x4C
+.fs_overhead		0x50
 
 ; initialize the stack
-mov ba 0x4000
-mov sp .stack+0x0400
+mov ba .bios
+mov sp 0x900
+sub sp sp 4 ;DEBUG: so memory dump lines up for easy reading
 
 ;
 ; Initialize the SD card.
@@ -29,28 +31,71 @@ jmp .SDinit
 ._ra0
 
 ;
-; Get the kernel size.
+; Read the first file header.
 ;
-sub sp sp 4
-add r0 sp ba; destination address (main memory)
-mov r1 .sd_kernel_size ; Skip past superBlock and read fileSize from first header (SD card)
-mov r2 0x4  ; count (4 bytes for kernel size)
+sub sp sp .fs_header_size	; make room on the stack for the header
+add r0 sp ba				; destination address (main memory)
+mov r1 .fs_super_size		; skip past superBlock and read first header (SD card)
+mov r2 .fs_header_size		; count (size of header)
 sub sp sp 4
 stw sp ._ra1
 jmp .SDread
 ._ra1
 
 ;
+; Get the kernel size (r5) and length (r6) from the header.
+;
+ldw r6 sp
+add sp sp 8
+ldw r5 sp
+add sp sp 68
+
+;
 ; Copy kernel into main memory.
 ;
-mov r0 0x0   ; destination address (main memory)
-mov r1 .sd_kernel_data  ; Skip past superBlock and read contents of first filesystem object (SD card)
-ldw r2 sp    ; count (kernel size on stack)
-add sp sp 4
+mov r0 .kernel			; destination address (main memory)
+mov r1 .sd_kernel_data	; Skip past superBlock and read contents of first filesystem object (SD card)
+mov r2 r5				; count (kernel size on stack)
 sub sp sp 4
 stw sp ._ra2
 jmp .SDread
 ._ra2
+
+;
+; Get offset of second file header.
+;
+add r6 r6 .fs_super_size
+add r6 r6 .fs_overhead
+
+;
+; Read the second file header.
+;
+sub sp sp .fs_header_size	; make room on the stack for the header
+add r0 sp ba				; destination address (main memory)
+mov r1 r6					; skip past superBlock and first file (SD card)
+mov r2 .fs_header_size		; count (size of header)
+sub sp sp 4
+stw sp ._ra3
+jmp .SDread
+._ra3
+
+;
+; Get the stdlib size (r5)
+;
+add sp sp 8
+ldw r5 sp
+add sp sp 68
+
+;
+; Copy standard library into main memory.
+;
+mov r0 .stdlib				; destination address (main memory)
+add r1 r6 .fs_header_size	; read contents of second file (SD card)
+mov r2 r5					; count (stdlib size on stack)
+sub sp sp 4
+stw sp ._ra4
+jmp .SDread
+._ra4
 
 ;
 ; Transfer control to the kernel.
