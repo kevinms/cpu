@@ -30,13 +30,13 @@ contigous objects.
 | Object N    |
 +-------------+
 
-The super block contains a magic number that acts as a signataure.
-There is a version number and offsets to the used and free lists which
+The super block contains a magic number that acts as both a signataure
+and version number. There are offsets to the used and free lists which
 are discussed more below.
 
 struct superBlock {
 	uint32_t magic;
-	uint32_t version;
+	uint32_t size;
 	uint32_t freeOffset;
 	uint32_t usedOffset;
 };
@@ -53,8 +53,8 @@ They are used to keep track of both used and free space.
 | Trailer |
 +---------+
 
-All used objects are connected in a singly linked list.
-All free objects are connected in another singly linked list.
+All used objects are connected in a doubly linked list.
+All free objects are connected in another doubly linked list.
 
                  Free Space
      .----------.---------------------.
@@ -66,13 +66,14 @@ All free objects are connected in another singly linked list.
                            '---------------------'
                                   Used Space
 
-Each header contains a next offset for the singly linked list.
+Each header contains a next and prev offset for the doubly linked list.
 The length field denotes how much space the object takes up minus the
 size of the header and trailer. The fileName field is for "used"
 objects and is the file name.
 
 struct header {
 	uint32_t length;
+	uint32_t prevOffset;
 	uint32_t nextOffset;
 	uint32_t fileSize;
 	uint8_t fileName[64];
