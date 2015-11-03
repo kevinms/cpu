@@ -12,8 +12,7 @@ baseAddress = stackAddress = stackSize = heapAddress = heapSize = 0x0
 header = False
 
 doAssemble = False
-binaryFile = None
-asciiFile = None
+binaryFile = asciiFile = symbolFile = None
 
 def error(msg):
 	print >> sys.stderr, msg
@@ -29,15 +28,19 @@ def output(msg, trailer = ' '):
 	if binaryFile is not None:
 		n = int(msg, 2)
 		if len(msg) == 8:
-			binaryFile.write( struct.pack('<B', n) );
+			binaryFile.write( struct.pack('<B', n) )
 		if len(msg) == 16:
-			binaryFile.write( struct.pack('<H', n) );
+			binaryFile.write( struct.pack('<H', n) )
 		if len(msg) == 32:
-			binaryFile.write( struct.pack('<I', n) );
+			binaryFile.write( struct.pack('<I', n) )
 
 	# ASCII Binary File
 	if asciiFile is not None:
-		asciiFile.write(msg + trailer);
+		asciiFile.write(msg + trailer)
+
+def exportSymbol(label):
+	if symbolFile is not None:
+		symbolFile.write(".%s 0x%X\n" % (label, labels[label]))
 
 def parseISA():
 	parse = 0
@@ -86,6 +89,7 @@ def loadLabels(source):
 	lineNum = 0
 	progOffset = baseAddress
 	for line in source:
+		export = False
 		lineNum += 1
 		code, octothorpe, comment = line.partition('#')
 		code, semicolon, comment = code.partition(';')
@@ -95,6 +99,9 @@ def loadLabels(source):
 			continue
 
 		tokens = code.split()
+		if tokens[0] == 'export':
+			export = True
+			tokens = tokens[1:]
 		if tokens[0][0] == '.':
 			if len(tokens) > 2:
 				error('line '+str(line)+': Invalid label syntax, too many tokens.')
@@ -102,6 +109,8 @@ def loadLabels(source):
 				labels[tokens[0][1:]] = int(tokens[1], 0)
 			else:
 				labels[tokens[0][1:]] = progOffset
+			if export:
+				exportSymbol(tokens[0][1:])
 			debug(str(lineNum)+': '+tokens[0][1:]+' -> '+str(labels[tokens[0][1:]]))
 		elif tokens[0] == 'w':
 			progOffset += 2
@@ -169,8 +178,8 @@ def assemble(source):
 		args = tokens[1:]
 		#print i, args
 
-		if i[0] == '.':
-			continue
+		if i[0] == '.' or i == 'export':
+			continue # skip label definitions
 
 		if i == 'w':
 			opr0, m0, a0 = parseOperand(args[0], 'c', lineNum, '032b')
@@ -214,7 +223,7 @@ def assemble(source):
 		mode = (mode | (absolute << 1))
 		mode = format(int(mode), '08b')
 		# Only one operand is variable and which one differs based on the opcode.
-		# Makes this assembler code look ugly, but lets us have compact binary.
+		# Makes this assembler code look ugly, but lets us have compact binaries.
 		if op['var'] == 0:
 			packInstruction(opcode, mode, opr1, opr2, opr0)
 		if op['var'] == 1:
@@ -241,8 +250,9 @@ options = [
 	('a:','assemble=','Translate assembly language into machine code.'),
 	('d:','disassemble=','Translate machine code into assembly language.'),
 	('b:','binary=','Output machine code to binary file.'),
-	('t:','text=','Output machine code to ascii binary file.')]
-	('s:','base-address=','Base address where the binary will start in memory.')]
+	('t:','text=','Output machine code to ascii binary file.'),
+	('s:','base-address=','Base address where the binary will start in memory.'),
+	('e:','export-symbols=','Output exported symbols to ABI file.')]
 shortOpt = "".join([opt[0] for opt in options])
 longOpt = [opt[1] for opt in options]
 
@@ -255,7 +265,8 @@ def usage():
 	sys.exit(1)
 
 def main():
-	global binaryFile, asciiFile
+	global binaryFile, asciiFile, symbolFile
+	global baseAddress
 
 	try:
 		opts, args = getopt.getopt(sys.argv[1:], shortOpt, longOpt)
@@ -284,19 +295,21 @@ def main():
 				debug("Using binary file " + a)
 		elif o in ('-t', '--text'):
 			asciiFile = open(a, "w")
+		elif o in ('-e', '--export-symbols'):
+			symbolFile = open(a, "w")
 
 		elif o in ('-s', '--base-address'):
-			baseAddress = int(a)
+			baseAddress = int(a, 0)
 
 		#TODO: finish implementing header info
 		elif o in ('-s', '--stack-address'):
-			stackAddress = int(a)
+			stackAddress = int(a, 0)
 		elif o in ('-z', '--stack-size'):
-			stackSize = int(a)
+			stackSize = int(a, 0)
 		elif o in ('-p', '--heap-address'):
-			heapAddress = int(a)
+			heapAddress = int(a, 0)
 		elif o in ('-z', '--heap-size'):
-			heapSize = int(a)
+			heapSize = int(a, 0)
 
 		else:
 			assert False, 'Unhandled option: ' + str(o)

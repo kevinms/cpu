@@ -1,0 +1,85 @@
+#######################################################################
+#
+# The Heap
+#
+#######################################################################
+
+The heap consists of a super block followed by a series of contigous
+objects.
+
++-------------+
+| Super Block |
++-------------+
+| Object 1    |
++-------------+
+| ...         |
++-------------+
+| Object N    |
++-------------+
+
+The super block contains a magic number that acts as both a signataure
+and version number. There are offsets to the used and free lists which
+are discussed more below.
+
+struct superBlock {
+	uint32_t size;
+	uint32_t freeOffset;
+	uint32_t usedOffset;
+};
+
+
+Each object consists of a header, some amount of space and a trailer.
+They are used to keep track of both used and free space.
+
++---------+
+| Header  |
++---------+
+| Space   |
++---------+
+| Trailer |
++---------+
+
+All used objects are connected in a doubly linked list.
+All free objects are connected in another doubly linked list.
+
+                 Free Space
+     .----------.---------------------.
+     v          v                     v
++----------+----------+----------+----------+----------+
+| Free Obj | Free Obj | Used Obj | Free Obj | Used Obj |
++----------+----------+----------+----------+----------+
+                           ^                     ^
+                           '---------------------'
+                                  Used Space
+
+Each header contains a next and prev offset for the doubly linked list.
+The length field denotes how much space the object takes up minus the
+size of the header and trailer.
+
+struct header {
+	uint32_t length;
+	uint32_t prevOffset;
+	uint32_t nextOffset;
+};
+
+Each trailer contains the header offset. This is used to quickly
+coalesce free objects with their neighbors.
+
+struct trailer {
+	uint32_t headerOffset;
+};
+
+When the heap is first initialized, it consists of a super block
+followed by a single free object that takes up all available space.
+The super block's freeOffset points to the free object.
+
+When a memory allocation is performed, the free object is removed from
+the free list and split into two objects. One object is given enough
+space to hold the new allocation and goes into the used list. The other
+object goes back into the free list.
+
+When a memory allocation is removed, the used object is removed from
+the used list. The neighboring objects, high and low, are checked to
+see if they are free. The object being freed is coalesced with it's
+neighbors if they are also free objects.
+

@@ -4,7 +4,10 @@
 #
 #######################################################################
 
-Decide whether the emulator prints decimal or hex numbers.
+DONE - Decide whether the emulator prints decimal or hex numbers.
+	   The emulator prints everything in hex except for the register
+	   number which is decimal. That exception is purely because
+	   registers are reference in assembly by their decimal number.
 
 Whatever endianess is decided upon, needs to be enforced in the
 emulator, assembler and fs utilities.
@@ -12,14 +15,16 @@ emulator, assembler and fs utilities.
 DONE - Option for assembler to begin PC at certain value.
        The --base-address option was added to the assembler for this.
 
-Assembler should export labels to ABI file so others can reference it.
-
-Implement the FS library and possibly use it in the BIOS.
+DONE - Assembler should export labels to ABI file so others can
+	   reference it. The --export-symbols option has been added to
+	   and you can specify a symbol file to dump symbols to.
 
 Determine sane offsets/sizes for the memory layout. I.e. placement and
 size of kernel, kernel's stack, mmap I/O region, standard library, etc.
 
 Implement malloc and free in the standard library.
+
+Implement the FS library and possibly use it in the BIOS.
 
 Kernel should use malloc and free to spawn new tasks.
 

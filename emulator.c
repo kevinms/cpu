@@ -337,12 +337,12 @@ void dumpRegisters(int printHeader, uint32_t nextPC, char *message)
 
 	printf("%-25s", message == NULL ? "" : message);
 
-	printf(" %5" PRIu32 " %5" PRIu32 " ", pc, nextPC);
+	printf(" %5" PRIX32 " %5" PRIX32 " ", pc, nextPC);
 	printf("%c%c%c%c  ",
 	       R_FL & FL_N ? 'n' : ' ', R_FL & FL_Z ? 'z' : ' ',
 	       R_FL & FL_V ? 'v' : ' ', R_FL & FL_C ? 'c' : ' ');
 	for(i = 0; i < NUM_REGISTERS; i++)
-		printf("%5" PRIu32 " ", r[i]);
+		printf("%5" PRIX32 " ", r[i]);
 	printf("\n");
 }
 
@@ -386,7 +386,7 @@ void deleteBreakpoint(uint64_t n)
 		 bp != NULL;
 		 prev = bp, bp = bp->next) {
 		if (bp->id == n) {
-			printf("Deleting breakpoint #%" PRIu64 "\n", bp->id);
+			printf("Deleting breakpoint #%" PRIX64 "\n", bp->id);
 			if (prev == NULL) {
 				bp_list = bp->next;
 			} else {
@@ -433,7 +433,7 @@ uint64_t addBreakpoint(char *name, uint64_t condition, uint64_t maxHits)
 	bp->next = bp_list;
 	bp_list = bp;
 
-	printf("Set breakpoint: %s %" PRIu64 "\n", name, condition);
+	printf("Set breakpoint: %s %" PRIX64 "\n", name, condition);
 
 	return(bp->id);
 }
@@ -448,7 +448,7 @@ int hitBreakpoint()
 		switch (bp->type) {
 		case BP_PC:
 			if (pc == (uint32_t)bp->condition) {
-				printf("Hit breakpoint #%" PRIu64 ": PC == 0x%" PRIX32 "\n", i, pc);
+				printf("Hit breakpoint #%" PRIX64 ": PC == 0x%" PRIX32 "\n", i, pc);
 				hitBP = bp;
 			}
 			break;
@@ -457,7 +457,7 @@ int hitBreakpoint()
 			fetchInst(pc, &o);
 
 			if ((o.op == jmp) && ((o.mode & MODE_OPERAND) == OPR_REG) && (o.raw2 == 4)) {
-				printf("Hit breakpoint #%" PRIu64 ": jmp r4\n", i);
+				printf("Hit breakpoint #%" PRIX64 ": jmp r4\n", i);
 				hitBP = bp;
 			}
 			break;
@@ -482,7 +482,7 @@ void listBreakpoints()
 
 	printf("Breakpoints:\n");
 	for (bp = bp_list, i = 0; bp != NULL; bp = bp->next, ++i) {
-		printf(" #%" PRIu64 " %s == %" PRIu64 "\n", i, bp_table[bp->type].name, bp->condition);
+		printf(" #%" PRIX64 " %s == %" PRIX64 "\n", i, bp_table[bp->type].name, bp->condition);
 	}
 }
 
@@ -866,33 +866,33 @@ int main(int argc, char **argv)
 		 * Arithmetic operations.
 		 */
 		case add:
-			log("add r[%" PRIu32 "] = %" PRIu32 " + %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("add r[%" PRIu32 "] = %" PRIX32 " + %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 + o.opr2;
 			if ((UINT32_MAX - o.opr1) < o.opr2) {
 				R_FL |= FL_C;
 			}
 			break;
 		case sub:
-			log("sub r[%" PRIu32 "] = %" PRIu32 " - %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("sub r[%" PRIu32 "] = %" PRIX32 " - %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 - o.opr2;
 			break;
 		case adc:
-			log("adc r[%" PRIu32 "] = %" PRIu32 " + %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("adc r[%" PRIu32 "] = %" PRIX32 " + %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 + o.opr2 + (R_FL & FL_C);
 			if ((UINT32_MAX - o.opr1) < o.opr2) {
 				R_FL |= FL_C;
 			}
 			break;
 		case sbc:
-			log("sbc r[%" PRIu32 "] = %" PRIu32 " - %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("sbc r[%" PRIu32 "] = %" PRIX32 " - %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 - o.opr2;
 			break;
 		case mul:
-			log("mul r[%" PRIu32 "] = %" PRIu32 " * %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("mul r[%" PRIu32 "] = %" PRIX32 " * %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 * o.opr2;
 			break;
 		case div:
-			log("div r[%" PRIu32 "] = %" PRIu32 " / %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("div r[%" PRIu32 "] = %" PRIX32 " / %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 / o.opr2;
 			break;
 
@@ -911,16 +911,16 @@ int main(int argc, char **argv)
 			break;
 		case stb:
 			address = getAddress(o.mode, o.opr0);
-			log("stb mem[%" PRIX32 "] = %" PRIu32, address, o.opr2);
+			log("stb mem[%" PRIX32 "] = %" PRIX32, address, o.opr2);
 			write8bit(address, (uint8_t)o.opr2);
 			break;
 		case stw:
 			address = getAddress(o.mode, o.opr0);
-			log("stw mem[%" PRIX32 "] = %" PRIu32, address, o.opr2);
+			log("stw mem[%" PRIX32 "] = %" PRIX32, address, o.opr2);
 			write32bit(address, hostToLittle32(o.opr2));
 			break;
 		case mov:
-			log("mov r[%" PRIu32 "] = %" PRIu32, o.reg0, o.opr2);
+			log("mov r[%" PRIu32 "] = %" PRIX32, o.reg0, o.opr2);
 			r[o.reg0] = o.opr2;
 			break;
 
@@ -928,27 +928,27 @@ int main(int argc, char **argv)
 		 * Bitwise operations.
 		 */
 		case and:
-			log("and r[%" PRIu32 "] = %" PRIu32 " & %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("and r[%" PRIu32 "] = %" PRIX32 " & %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 & o.opr2;
 			break;
 		case or:
-			log("or r[%" PRIu32 "] = %" PRIu32 " | %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("or r[%" PRIu32 "] = %" PRIX32 " | %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 | o.opr2;
 			break;
 		case xor:
-			log("xor r[%" PRIu32 "] = %" PRIu32 " ^ %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("xor r[%" PRIu32 "] = %" PRIX32 " ^ %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 ^ o.opr2;
 			break;
 		case nor:
-			log("nor r[%" PRIu32 "] = ~%" PRIu32 " & ~%" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("nor r[%" PRIu32 "] = ~%" PRIX32 " & ~%" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = ~o.opr1 & ~o.opr2;
 			break;
 		case lsl:
-			log("lsl r[%" PRIu32 "] = %" PRIu32 " << %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("lsl r[%" PRIu32 "] = %" PRIX32 " << %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 << o.opr2;
 			break;
 		case lsr:
-			log("lsr r[%" PRIu32 "] = %" PRIu32 " >> %" PRIu32, o.reg0, o.opr1, o.opr2);
+			log("lsr r[%" PRIu32 "] = %" PRIX32 " >> %" PRIX32, o.reg0, o.opr1, o.opr2);
 			r[o.reg0] = o.opr1 >> o.opr2;
 			break;
 
@@ -957,7 +957,7 @@ int main(int argc, char **argv)
 		 */
 		case bez:
 			address = getAddress(o.mode, o.opr2);
-			log("bez %" PRIu32 " %" PRIu32 " == 0", address, o.opr0);
+			log("bez %" PRIX32 " %" PRIX32 " == 0", address, o.opr0);
 			if (o.opr0 == 0) {
 				nextPC = address;
 				R_FL |= FL_Z;
@@ -965,7 +965,7 @@ int main(int argc, char **argv)
 			break;
 		case bnz:
 			address = getAddress(o.mode, o.opr2);
-			log("bnz %" PRIu32 " %" PRIu32 " == 0", address, o.opr0);
+			log("bnz %" PRIX32 " %" PRIX32 " == 0", address, o.opr0);
 			if (o.opr0 != 0) {
 				nextPC = address;
 				R_FL &= ~FL_Z;
@@ -973,35 +973,35 @@ int main(int argc, char **argv)
 			break;
 		case ble:
 			address = getAddress(o.mode, o.opr2);
-			log("ble %" PRIu32 " %" PRIu32 " <= 0", address, o.opr0);
+			log("ble %" PRIX32 " %" PRIX32 " <= 0", address, o.opr0);
 			if (o.opr0 <= 0) {
 				nextPC = address;
 			}
 			break;
 		case bge:
 			address = getAddress(o.mode, o.opr2);
-			log("bge %" PRIu32 " %" PRIu32 " >= 0", address, o.opr0);
+			log("bge %" PRIX32 " %" PRIX32 " >= 0", address, o.opr0);
 			if (o.opr0 >= 0) {
 				nextPC = address;
 			}
 			break;
 		case bne:
 			address = getAddress(o.mode, o.opr2);
-			log("bne %" PRIu32 " %" PRIu32 " != %" PRIu32, address, o.opr0, o.opr1);
+			log("bne %" PRIX32 " %" PRIX32 " != %" PRIX32, address, o.opr0, o.opr1);
 			if (o.opr0 != o.opr1) {
 				nextPC = address;
 			}
 			break;
 		case beq: break;
 			address = getAddress(o.mode, o.opr2);
-			log("beq %" PRIu32 " %" PRIu32 " == %" PRIu32, address, o.opr0, o.opr1);
+			log("beq %" PRIX32 " %" PRIX32 " == %" PRIX32, address, o.opr0, o.opr1);
 			if (o.opr0 == o.opr1) {
 				nextPC = address;
 			}
 			break;
 		case jmp:
 			address = getAddress(o.mode, o.opr2);
-			log("jmp %" PRIu32, address);
+			log("jmp %" PRIX32, address);
 			nextPC = address;
 			break;
 
@@ -1013,7 +1013,7 @@ int main(int argc, char **argv)
 			stop = 1;
 			break;
 		default:
-			fprintf(stderr, "Unknown opcode: %" PRIu32 "\n", o.op);
+			fprintf(stderr, "Unknown opcode: %" PRIX32 "\n", o.op);
 			stop = 1;
 			break;
 		}
