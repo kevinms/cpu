@@ -68,8 +68,9 @@ All free objects are connected in another doubly linked list.
 
 Each header contains a next and prev offset for the doubly linked list.
 The length field denotes how much space the object takes up minus the
-size of the header and trailer. The fileName field is for "used"
-objects and is the file name.
+size of the header and trailer. The fileName and fileSize fields are
+for "used" objects. The fileSize field is also used to indicate if an
+object is free with the special value UINT32_MAX.
 
 struct header {
 	uint32_t length;
@@ -98,7 +99,8 @@ into the free list.
 When a file is removed, the used object is removed from the used list.
 The neighboring objects, high and low, are checked to see if they are
 free. The object being freed is coalesced with it's neighbors if they
-are also free objects.
+are also free objects. Each neighbor's fileSize is used to know if that
+object is free. The special value of UINT32_MAX indicates it is free.
 
 To list all files within the filesystem, traverse the used list and
 identify files by the fileName and fileSize field in each object header.
