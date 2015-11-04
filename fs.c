@@ -579,10 +579,10 @@ int listFiles()
 		thisUsed = mapping + thisOffset;
 
 		if (count == 0) {
-			fprintf(stderr, "Bytes     File\n");
+			fprintf(stderr, "Size       Offset     File\n");
 		}
-		fprintf(stderr, "%-10" PRIu32 " %s\n",
-				thisUsed->fileSize, thisUsed->fileName);
+		fprintf(stderr, "%-10" PRIu32 " 0x%-8" PRIX32 " %s\n",
+				thisUsed->fileSize, thisOffset, thisUsed->fileName);
 	}
 
 	fprintf(stderr, "%" PRIu32 " files\n", count);

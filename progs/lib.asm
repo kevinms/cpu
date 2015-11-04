@@ -16,7 +16,8 @@ w 0x0 ; Heap Offset
 ; in  r1 heap size
 export .init_malloc
 
-stw @.__heapOffset r0
+mov r2 .__heapOffset
+stw @r2 r0
 
 add r2 r0 12 ; header offset
 add r3 r0 r1
@@ -55,15 +56,20 @@ export .malloc
 ldw r1 @.__heapOffset ; super block
 
 ; load value of freeOffset from super block
-mov r2 r1 4
+add r2 r1 4
 ldw r2 @r2
 
-bez .__nextfree r2 ; stop walking the free list if we reach 0x0
+cmp r2 0
+jz .__nextfree ; stop walking the free list if we reach 0x0
 
 ; load length from first free block
 ldw r3 @r2
 
-ble .__nextfree r3  ; if a free block length >= requested size it fits
+
+cmp r0 r3
+jlt .__nextfree
+
+;ble .__nextfree r3 r0; if requested size < free block length it fits
 
 	; if length >= requested size + 12 split free block
 		; remove from free list

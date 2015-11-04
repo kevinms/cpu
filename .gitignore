@@ -1,6 +1,7 @@
 *.[oa]
 *.rom
 *.bin
+*.sym
 emulator
 fs
 *.swp
