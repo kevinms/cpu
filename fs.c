@@ -136,6 +136,7 @@ struct superBlock {
 
 struct header {
 	uint32_t length;
+	uint32_t prevOffset;
 	uint32_t nextOffset;
 	uint32_t fileSize;
 	uint8_t fileName[64];
@@ -163,7 +164,7 @@ void printSuperBlock(struct superBlock *super)
 {
 	fprintf(stderr, "Super Block at 0x%" PRIX32 ":\n", (uint32_t)(((void *)super) - mapping));
 	fprintf(stderr, "\tmagic:      0x%" PRIX32 "\n", super->magic);
-	fprintf(stderr, "\tsize:    0x%" PRIX32 "\n", super->size);
+	fprintf(stderr, "\tsize:       0x%" PRIX32 "\n", super->size);
 	fprintf(stderr, "\tfreeOffset: 0x%" PRIX32 "\n", super->freeOffset);
 	fprintf(stderr, "\tusedOffset: 0x%" PRIX32 "\n", super->usedOffset);
 }
@@ -172,6 +173,7 @@ void printObject(struct header *header, struct trailer *trailer)
 {
 	fprintf(stderr, "Header at 0x%" PRIX32 ":\n", (uint32_t)(((void *)header) - mapping));
 	fprintf(stderr, "\tlength:      0x%" PRIX32 "\n", header->length);
+	fprintf(stderr, "\tprevOffset:  0x%" PRIX32 "\n", header->prevOffset);
 	fprintf(stderr, "\tnextOffset:  0x%" PRIX32 "\n", header->nextOffset);
 	fprintf(stderr, "\tfileSize:    0x%" PRIX32 "\n", header->fileSize);
 	fprintf(stderr, "\tfileName:    %s\n", header->fileName);
@@ -199,6 +201,41 @@ int scanImage()
 	}
 
 	return(0);
+}
+
+void unlinkObject(uint32_t *headOffset, struct header *this)
+{
+	struct header *prev;
+	struct header *next;
+	uint32_t thisOffset = (uintptr_t)this - (uintptr_t)mapping;
+
+	if (this->prevOffset != 0) {
+		prev = mapping + this->prevOffset;
+		prev->nextOffset = this->nextOffset;
+	}
+	if (this->nextOffset != 0) {
+		next = mapping + this->nextOffset;
+		next->prevOffset = this->prevOffset;
+	}
+
+	if (*headOffset == thisOffset) {
+		*headOffset = this->nextOffset;
+	}
+}
+
+void linkObject(uint32_t *headOffset, struct header *this)
+{
+	struct header *next;
+	uint32_t thisOffset = (uintptr_t)this - (uintptr_t)mapping;
+
+	if (*headOffset != 0) {
+		next = mapping + *headOffset;
+		next->prevOffset = thisOffset;
+	}
+
+	this->prevOffset = 0;
+	this->nextOffset = *headOffset;
+	*headOffset = thisOffset;
 }
 
 int openDiskImage()
@@ -277,14 +314,15 @@ int openDiskImage()
 
 		super->magic = 0x42;
 		super->size = imageSize;
-		super->freeOffset = OBJECT_SUPER;
+		super->freeOffset = 0;
 		super->usedOffset = 0;
 
 		memset(header, 0, OBJECT_HEADER);
 		header->length = imageSize - OBJECT_SUPER - OBJECT_OVERHEAD;
-		header->nextOffset = 0;
-
+		header->fileSize = UINT32_MAX;
 		trailer->headerOffset = OBJECT_SUPER;
+
+		linkObject(&super->freeOffset, header);
 	}
 
 	return(0);
@@ -293,7 +331,6 @@ int openDiskImage()
 int addFile(char *filePath)
 {
 	struct superBlock *super = mapping;
-	struct header *prevFree;
 	struct header *thisFree;
 	struct header *thisUsed;
 	struct stat statBuffer;
@@ -320,8 +357,6 @@ int addFile(char *filePath)
 	 * Find a free object that can contain the new file.
 	 */
 	foundSpace = 0;
-	super = mapping;
-	prevFree = NULL;
 	for (thisOffset = super->freeOffset;
 		 thisOffset != 0;
 		 thisOffset = thisFree->nextOffset) {
@@ -331,8 +366,6 @@ int addFile(char *filePath)
 			foundSpace = 1;
 			break;
 		}
-
-		prevFree = thisFree;
 	}
 
 	if (foundSpace == 0) {
@@ -368,17 +401,12 @@ int addFile(char *filePath)
 	/*
 	 * Remove free object from free list.
 	 */
-	if (prevFree == NULL) {
-		super->freeOffset = thisFree->nextOffset;
-	} else {
-		prevFree->nextOffset = thisFree->nextOffset;
-	}
-	thisFree->nextOffset = 0;
-	prevFree = NULL;
+	unlinkObject(&super->freeOffset, thisFree);
 
 	thisUsed = thisFree;
 	thisUsed->fileSize = fileSize;
 	strncpy((char *)thisUsed->fileName, filePath, sizeof(thisUsed->fileName) - 1);
+
 	if (thisUsed->length >= fileSize + OBJECT_OVERHEAD) {
 		uint32_t newFreeOffset;
 		struct trailer *freeTrailer;
@@ -393,9 +421,9 @@ int addFile(char *filePath)
 		newFreeOffset = thisOffset + fileSize + OBJECT_OVERHEAD;
 		thisFree = mapping + newFreeOffset;
 		thisFree->length = thisUsed->length - fileSize - OBJECT_OVERHEAD;
-		thisFree = mapping + super->freeOffset;
-		super->freeOffset = newFreeOffset;
+		thisFree->fileSize = UINT32_MAX;
 		freeTrailer->headerOffset = newFreeOffset;
+		linkObject(&super->freeOffset, thisFree);
 
 		thisUsed->length = fileSize;
 		usedTrailer->headerOffset = thisOffset;
@@ -404,14 +432,93 @@ int addFile(char *filePath)
 	/*
 	 * Add used object to used list.
 	 */
-	thisUsed->nextOffset = super->usedOffset;
-	super->usedOffset = thisOffset;
+	linkObject(&super->usedOffset, thisUsed);
 
 	return(0);
 }
 
+int coalesceObjects(struct header *left, struct header *right)
+{
+	struct superBlock *super = mapping;
+	uint32_t leftOffset;
+
+	if ((left->fileSize != UINT32_MAX) || (right->fileSize != UINT32_MAX)) {
+		/*
+		 * Can't coalesce.
+		 */
+		return(0);
+	}
+
+	struct trailer *rightTrailer = (void *)right + right->length + OBJECT_HEADER;
+
+	unlinkObject(&super->freeOffset, left);
+	unlinkObject(&super->freeOffset, right);
+
+	left->length += right->length + OBJECT_OVERHEAD;
+	leftOffset = (uintptr_t)left - (uintptr_t)mapping;
+	rightTrailer->headerOffset = leftOffset;
+	memset(mapping + leftOffset + OBJECT_HEADER, 0, left->length);
+
+	linkObject(&super->freeOffset, left);
+
+	return(1);
+}
+
 int deleteFile(char *filePath)
 {
+	struct superBlock *super = mapping;
+	struct header *this;
+	uint32_t thisOffset;
+
+	for (thisOffset = super->usedOffset;
+		 thisOffset != 0;
+		 thisOffset = this->nextOffset) {
+		this = mapping + thisOffset;
+
+		if (strncmp((char *)this->fileName, filePath, strlen(filePath)) == 0) {
+			struct header *neighbor;
+			int coalesced = 0;
+
+			/*
+			 * Found the file to delete.
+			 */
+			unlinkObject(&super->usedOffset, this);
+			this->fileSize = UINT32_MAX;
+			memset(mapping + thisOffset + OBJECT_HEADER, 0, this->length);
+
+			/*
+			 * Try to coalesce with left neighbor.
+			 */
+			if (thisOffset > OBJECT_SUPER) {
+				struct trailer *trailer = (void *)this - OBJECT_TRAILER;
+				neighbor = mapping + trailer->headerOffset;
+				coalesced += coalesceObjects(neighbor, this);
+				fprintf(stderr, "Tried to coalesce left: %d\n", coalesced);
+			}
+			if (coalesced > 0) {
+				this = neighbor;
+				thisOffset = (uintptr_t)neighbor - (uintptr_t)mapping;
+			}
+
+			/*
+			 * Try to coalesce with right neighbor.
+			 */
+			if (thisOffset + this->length + OBJECT_OVERHEAD < UINT32_MAX) {
+				neighbor = (void *)this + this->length + OBJECT_OVERHEAD;
+				coalesced += coalesceObjects(this, neighbor);
+				fprintf(stderr, "Tried to coalesce right: %d\n", coalesced);
+			}
+
+			/*
+			 * Insert into the free list, if we couldn't coalesce.
+			 */
+			if (coalesced == 0) {
+				fprintf(stderr, "Couldn't coalesce with neighbors.\n");
+				linkObject(&super->freeOffset, this);
+			}
+			break;
+		}
+	}
 	return(0);
 }
 
