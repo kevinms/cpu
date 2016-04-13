@@ -1,0 +1,23 @@
+#######################################################################
+#
+# Interpreted Langauge Specification
+#
+#######################################################################
+
+Data Types
+ - Integer
+ - Floating Point
+ - Character
+ - String
+ - Array
+Variables
+Expressions
+Conditional Statements
+Control Flow
+Functions
+Pointers
+Memory Management
+
+import/include statements?
+classes?
+multiple return values?

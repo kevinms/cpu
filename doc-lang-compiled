@@ -1,0 +1,95 @@
+
+                  Compiled Language Specification
+
+1. Data Types
+2. Structures
+3. Selection Statements
+4. Iteration Statements
+5. Functions
+6. Math Expressions
+
+=======================================================================
+1. Data Types
+=======================================================================
+
+	u8 u32            Unsigned Integer
+	i8 i32            Signed Integer
+	<type> *          Pointer
+	<type> foo[<n>]   Array
+
+Exmaple:
+
+	u8 foo = 255;
+	i32 bar = -2147483648;
+	u32 bob[2] = {1, 2};
+
+=======================================================================
+2. Structures
+=======================================================================
+
+	struct foobar {
+		u8 foo;
+		i32 bar;
+	};
+
+=======================================================================
+3. Selection Statments
+=======================================================================
+
+	if ( expression ) {
+		statement;
+	}
+
+=======================================================================
+4. Iteration Statments
+=======================================================================
+
+	while ( expression ) {
+		statement;
+	}
+
+	for ( expression; expression; expression ) {
+		statement;
+	}
+
+Jump Statements:
+	
+	break;
+	continue;
+
+=======================================================================
+5. Functions
+=======================================================================
+
+<return-type> bar(<param-1>, <param-2>, ...) {
+	statement;
+	return <variable | constant>;
+}
+
+=======================================================================
+6. Math Expressions
+=======================================================================
+
+Operator Precedence:
+
+	left-to-right
+		Parentheses     ()
+		Array Subscript []
+		Select Member   .
+		Select Member   ->
+
+	right-to-left
+		Dereference     *
+		Address Of      &
+
+	left-to-right
+		Math            * / %
+		Math            + -
+		Relational      < <= > >= == !=
+		Bitwise         & ^ | ~
+		Logical         && ||
+
+	right-to-left
+		Assignment      =
+
+
