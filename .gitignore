@@ -2,6 +2,9 @@
 *.rom
 *.bin
 *.sym
+*.img
+*.memory
 emulator
 fs
+heap
 *.swp

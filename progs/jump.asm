@@ -14,107 +14,87 @@
 ;   &&  and
 ;   ||  or
 ;    !  not
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; jnz
 ;
-; Common bitwise operators:
-;   &  and
-;   |  or
-;   ^  xor
-;   ~  not
-;  <<  shift left
-;  >>  shift right
 
+; true
+mov r0 2
+cmp r0 0
+jnz .notzero_t
+mov r0 4
+.notzero_t
+nop
 
-; less than:
-; r0 < r1
-mov r0 0
-mov r1 1
-blt .lt r0 r1
-mov r2 42
-.lt
+; false
+mov r0 2
+cmp r0 2
+jnz .notzero_f
+mov r0 4
+.notzero_f
+nop
 
-; greater than:
-; r0 > r1
-mov r0 1
-mov r1 0
-bgt .gt r0 r1
-mov r2 42
-.gt
-
-; less than or equal to
-; r0 <= r1
-mov r0 0
-mov r1 1
-bgt .lte r1 r0
-mov r2 42
-.lte
-
-; greater than or equal to
-; r0 >= r1
-mov r0 1
-mov r1 0
-blt .gte r1 r0
-mov r2 42
-.gte
-
-; not equal to
-; r0 != r1
-mov r0 0
-mov r1 1
-bne .ne r0 r1
-mov r2 42
-.ne
-
-; equal to
-; r0 == r1
-mov r0 0
-mov r1 1
-beq .eq r0 r1
-mov r2 42
-.eq
-
-
-; logical or
-; r0 = 1;
-; r1 = 0;
-; if (r0 < r1 || r1 == 0) {
-;     r2 = 42;
-; }
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; jz
 ;
-.lor
-	mov r0 1
-	mov r1 0
-	blt .lor_doit r0 r1
-	bez .lor_doit r1
-	jmp .lor_done
-.lor_doit
-	mov r2 42
-.lor_done
 
-; logical and
-; r0 = 0;
-; r1 = 0;
-; if ((r0 == r1) && (r0 > 5)) {
-;     r2 = 42;
-; }
-.land
-	mov r0 6
-	mov r1 6
-	bne .land_done r0 r1
-	mov r3 5
-	ble .land_done r0 r3
-	jmp .lor_done
-.land_doit
-	mov r2 42
-.land_done
+; true
+mov r0 2
+cmp r0 2
+jz .zero_t
+mov r0 4
+.zero_t
+nop
 
-; same as above but without using ble
-.land2
-	mov r0 0
-	mov r1 0
-	bne .land_done r0 r1
-	mov r3 5
-	bgt .land_doit r0 r3
-	jmp .land2_done
-.land2_doit
-	mov r2 42
-.land2_done
+; flase
+mov r0 2
+cmp r0 0
+jz .zero_f
+mov r0 4
+.zero_f
+nop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; jl
+;
+
+; true
+mov r0 2
+mov r1 3
+cmp r0 r1
+jl .less_t
+mov r0 4
+.less_t
+nop
+
+; false
+mov r0 3
+mov r1 2
+cmp r0 r1
+jl .less_f
+mov r0 4
+.less_f
+nop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; jg
+;
+
+; true
+mov r0 3
+mov r1 2
+cmp r0 r1
+jg .greater_t
+mov r0 4
+.greater_t
+nop
+
+; false
+mov r0 2
+mov r1 3
+cmp r0 r1
+jg .greater_f
+mov r0 4
+.greater_f
+die

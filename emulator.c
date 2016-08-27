@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -17,6 +18,13 @@
 	do { \
 		sprintf(msg, ##__VA_ARGS__); \
 	} while(0)
+
+struct flags {
+	uint32_t n : 1, // negative
+	         z : 1, // zero
+	         o : 1, // overflow
+	         c : 1; // carry
+};
 
 /*
  * Registers:
@@ -33,6 +41,7 @@
 #define R_FL r[13]
 #define R_C1 r[14]
 #define R_C2 r[15]
+#define flags (*((struct flags *)(r+13)))
 
 /*
  * Memory Mapped I/O:
@@ -59,7 +68,9 @@ struct cpuState {
 
 #define NUM_REGISTERS 16
 uint32_t r[NUM_REGISTERS], pc;
-uint8_t mem[32*1024*1024] = {0};
+uint32_t memSize = 32 * 1024 * 1024;
+uint8_t *mem;
+char *memoryFile = "emulator.memory";
 
 uint64_t 	ic;
 uint32_t 	nextPC;
@@ -121,11 +132,63 @@ uint32_t hostToLittle32(uint32_t x)
 	return byteSwap32(x);
 }
 
-void initEnvironment()
+int openMemoryFile()
 {
-	memset(mem, 0, sizeof(mem));
+	int fd;
+	int openFlags;
+	int mode;
+
+	if (memoryFile == NULL) {
+		fprintf(stderr, "Must provide a memory file.\n");
+		return(-1);
+	}
+
+	openFlags = O_RDWR | O_CREAT;
+	mode = S_IRWXU | S_IRWXG;
+
+	if ((fd = open(memoryFile, openFlags, mode)) < -1) {
+		fprintf(stderr, "Can't open %s: %s\n", memoryFile, strerror(errno));
+		return(-1);
+	}
+
+	/*
+	 * Size the new image.
+	 */
+	if (ftruncate(fd, 0) < 0) {
+		fprintf(stderr, "Can't truncate to zero: %s\n", strerror(errno));
+		close(fd);
+		return(-1);
+	}
+	if (ftruncate(fd, memSize) < 0) {
+		fprintf(stderr, "Can't truncate to %" PRIu32 ": %s\n",
+				memSize, strerror(errno));
+		close(fd);
+		return(-1);
+	}
+
+	if ((mem = mmap(NULL, memSize, PROT_READ | PROT_WRITE,
+					MAP_SHARED, fd, 0)) == MAP_FAILED) {
+		fprintf(stderr, "Can't memory map memory file: %s\n",
+				strerror(errno));
+		close(fd);
+		return(-1);
+	}
+	close(fd);
+
+	return(0);
+}
+
+int initEnvironment()
+{
+	if (openMemoryFile() < 0) {
+		return -1;
+	}
+	memset(mem, 0, memSize);
+
 	memset(r, 0, sizeof(r));
 	pc = 0;
+
+	return 0;
 }
 
 int addBinary(char *binaryInfo)
@@ -172,8 +235,8 @@ int loadBinary(struct binary *binary)
 		exit(1);
 	}
 
-	if ((binary->memoryOffset > sizeof(mem)) ||
-		(statBuffer.st_size > sizeof(mem) - binary->memoryOffset)) {
+	if ((binary->memoryOffset > memSize) ||
+		(statBuffer.st_size > memSize - binary->memoryOffset)) {
 		fprintf(stderr, "Binary does not fit in memory.\n");
 		exit(1);
 	}
@@ -282,16 +345,16 @@ fetchInst(uint32_t lpc, struct instruction *o)
 
 void dumpMemory(int width)
 {
-	uint64_t i;
+	int64_t i;
 	uint64_t addr;
 	uint8_t *line = NULL;
 	int duplicate;
 
 	duplicate = 0;
-	for (addr = 0; addr < UINT16_MAX; ++addr) {
+	for (addr = 0; addr < memSize; ++addr) {
 		if ((addr % width) == 0) {
 			if ((line != NULL) &&
-				(addr + width < UINT64_MAX) &&
+				(addr + width < memSize) &&
 				(memcmp(line, mem+addr, width) == 0)) {
 				if (duplicate == 0) {
 					printf("\n*");
@@ -306,11 +369,9 @@ void dumpMemory(int width)
 			printf("0x%.4" PRIX64, addr);
 		}
 		printf(" %.2x", mem[addr]);
-		if ((((addr+1) % width) == 0) ||
-			(addr == UINT16_MAX)) {
+		if ((((addr+1) % width) == 0) || (addr == memSize)) {
 			printf("  >");
-			i = width;
-			for (; i > 0; --i) {
+			for (i = width - 1; i >= 0; --i) {
 				char c = mem[addr-i];
 				printf("%c", isgraph(c) ? c : '.');
 			}
@@ -859,7 +920,7 @@ int main(int argc, char **argv)
 		switch (o.op) {
 
 		case nop:
-			log("nop\n");
+			log("nop");
 			break;
 
 		/*
@@ -955,54 +1016,45 @@ int main(int argc, char **argv)
 		/*
 		 * Branches and jumps.
 		 */
-		case bez:
-			address = getAddress(o.mode, o.opr2);
-			log("bez %" PRIX32 " %" PRIX32 " == 0", address, o.opr0);
-			if (o.opr0 == 0) {
-				nextPC = address;
-				R_FL |= FL_Z;
-			}
-			break;
-		case bnz:
-			address = getAddress(o.mode, o.opr2);
-			log("bnz %" PRIX32 " %" PRIX32 " == 0", address, o.opr0);
-			if (o.opr0 != 0) {
-				nextPC = address;
-				R_FL &= ~FL_Z;
-			}
-			break;
-		case ble:
-			address = getAddress(o.mode, o.opr2);
-			log("ble %" PRIX32 " %" PRIX32 " <= 0", address, o.opr0);
-			if (o.opr0 <= 0) {
-				nextPC = address;
-			}
-			break;
-		case bge:
-			address = getAddress(o.mode, o.opr2);
-			log("bge %" PRIX32 " %" PRIX32 " >= 0", address, o.opr0);
-			if (o.opr0 >= 0) {
-				nextPC = address;
-			}
-			break;
-		case bne:
-			address = getAddress(o.mode, o.opr2);
-			log("bne %" PRIX32 " %" PRIX32 " != %" PRIX32, address, o.opr0, o.opr1);
-			if (o.opr0 != o.opr1) {
-				nextPC = address;
-			}
-			break;
-		case beq: break;
-			address = getAddress(o.mode, o.opr2);
-			log("beq %" PRIX32 " %" PRIX32 " == %" PRIX32, address, o.opr0, o.opr1);
-			if (o.opr0 == o.opr1) {
-				nextPC = address;
-			}
+		case cmp:
+			log("cmp r[%" PRIu32 "] %" PRIX32, o.reg0, o.opr2);
+			uint32_t temp = r[o.reg0] - o.opr2;
+			// flags.n = temp & (0x1 << 31); // enable when signed arithmetic is supported
+			flags.z = (temp == 0) ? 1 : 0;
+			flags.c = r[o.reg0] < o.opr2; // borrow?
 			break;
 		case jmp:
 			address = getAddress(o.mode, o.opr2);
 			log("jmp %" PRIX32, address);
 			nextPC = address;
+			break;
+		case jz:
+			address = getAddress(o.mode, o.opr2);
+			log("jz %" PRIX32, address);
+			if (flags.z != 0) {
+				nextPC = address;
+			}
+			break;
+		case jnz:
+			address = getAddress(o.mode, o.opr2);
+			log("jnz %" PRIX32, address);
+			if (flags.z == 0) {
+				nextPC = address;
+			}
+			break;
+		case jl:
+			address = getAddress(o.mode, o.opr2);
+			log("jl %" PRIX32, address);
+			if (flags.c != 0) {
+				nextPC = address;
+			}
+			break;
+		case jg:
+			address = getAddress(o.mode, o.opr2);
+			log("jg %" PRIX32, address);
+			if (flags.c == 0) {
+				nextPC = address;
+			}
 			break;
 
 		/*
@@ -1017,9 +1069,15 @@ int main(int argc, char **argv)
 			stop = 1;
 			break;
 		}
+
 		dumpRegisters(0, nextPC, msg);
 
 		pc = nextPC;
+		if (pc > memSize) {
+			fprintf(stderr, "ERROR: Can't access memory at 0x%" PRIX32 "\n", pc);
+			stop = 1;
+			break;
+		}
 	}
 	interactive();
 

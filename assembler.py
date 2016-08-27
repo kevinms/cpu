@@ -111,9 +111,9 @@ def loadLabels(source):
 				labels[tokens[0][1:]] = progOffset
 			if export:
 				exportSymbol(tokens[0][1:])
-			debug(str(lineNum)+': '+tokens[0][1:]+' -> '+str(labels[tokens[0][1:]]))
+			debug("%d:%s -> %X" % (lineNum, tokens[0][1:], labels[tokens[0][1:]]))
 		elif tokens[0] == 'w':
-			progOffset += 2
+			progOffset += 4
 		elif tokens[0] == 'b':
 			progOffset += 1
 		else:
@@ -189,6 +189,10 @@ def assemble(source):
 			opr0, m0, a0 = parseOperand(args[0], 'c', lineNum, '08b')
 			output(opr0, '\n')
 			continue;
+
+		if i not in iset:
+			error('line '+str(lineNum)+': Unrecognized assembly instruction: '+i)
+			sys.exit(1)
 
 		op = iset[i]
 		opcode = op['opcode']

@@ -6,87 +6,187 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Globals
 ;
+
+;TODO: why is the heapOffset using absolute addressing?
+;      could i just modify the base offset so everything
+;      is position independant (relative)?
+
+; All code below expects to access the __heapOffsedt using absolute addressing.
+; This means the standard "lib" must be assembled with a static memory
+; position, i.e. assembler.py --base-address=<offset> -a lib.asm
 .__heapOffset
 w 0x0 ; Heap Offset
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Constants
+;
+
+; Heap structure sizes.
+.__heapSuper         12
+.__heapHeader        12
+.__heapTrailer       4
+.__heapHeaderTrailer 16
+.__heapSmallest      17 ; Smallest allowed object. (header + 1 + trailer)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Initialize the dynamic memory allocator.
 ;
-; in  r0 heap offset
-; in  r1 heap size
+; in @r0 desired heap offset
+; in  r1 desired heap size
 export .init_malloc
 
-mov r2 .__heapOffset
-stw @r2 r0
+	mov r2 .__heapOffset
+	stw @r2 r0
 
-add r2 r0 12 ; header offset
-add r3 r0 r1
-sub r3 r3 4  ; trailer offset
-sub r4 r1 28 ; free space length
+	add r3 r0 r1 ; end of heap offset
+	add r2 r0 12 ; free object header offset
+	sub r3 r3 4  ; free object trailer offset
+	sub r4 r1 .__heapSuper
+	sub r4 r4 .__heapHeaderTrailer ; free object length
 
-; init super block
-stw @r0 r1
-add r0 r0 4
-stw @r0 0x0
-add r0 r0 4
-stw @r0 r2
+	; init super block
+	stw @r0 r1  ; size
+	add r0 r0 4
+	stw @r0 r2  ; freeOffset
+	add r0 r0 4
+	stw @r0 0x0 ; usedOffset (no used blocks to start out with)
 
-; init free block header
-stw @r3 r2
+	; init free object trailer
+	stw @r3 r2
 
-; init free block header
-stw @r2 r4
-add r2 r2 4
-stw @r2 0x0
-add r2 r2 4
-stw @r2 0x0
+	; init free block header
+	stw @r2 r4  ; length
+	add r2 r2 4
+	stw @r2 0x0 ; prevOffset
+	add r2 r2 4
+	stw @r2 0x0 ; nextOffset
 
-; return to caller
-ldw r4 sp
-add sp sp 2
-jmp r4
+	; return to caller
+	ldw r4 sp
+	add sp sp 2
+	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Dynamically allocate a region of memory.
 ;
-; in  r0 requested size (bytes)
-; out r3 address of allocation
+; in   r0 requested size (bytes)
+; out @r3 address of allocation (0 on failure)
 export .malloc
 
-ldw r1 @.__heapOffset ; super block
+	ldw r1 @.__heapOffset ; super block offset
 
-; load value of freeOffset from super block
-add r2 r1 4
-ldw r2 @r2
+	add r1 r1 4
+	ldw r1 @r1  ; super.freeOffset
 
-cmp r2 0
-jz .__nextfree ; stop walking the free list if we reach 0x0
+	;
+	; Walk the free list looking for a candidate.
+	; r1 - (this) candidate offset
+	;
+	.__l_malloc_walk
+	cmp r1 0
+	jz .__l_malloc_return
 
-; load length from first free block
-ldw r3 @r2
+		ldw r2 @r1 ; this.length
+		cmp r2 r0
+		jg .__l_malloc_detach
 
+		add r1 r1 8
+		ldw r1 @r1 ; this.nextOffset
+		jmp .__l_malloc_walk
 
-cmp r0 r3
-jlt .__nextfree
+	;
+	; Detach from free list.
+	;
+	.__l_malloc_detach
+	add r2 r1 4
+	add r3 r1 8
+	ldw r2 @r2  ; this.prevOffset
+	ldw r3 @r3  ; this.nextOffset
 
-;ble .__nextfree r3 r0; if requested size < free block length it fits
+	add r4 r2 8
+	stw @r4 r3 ; prev.nextOffset = this.nextOffset
 
-	; if length >= requested size + 12 split free block
-		; remove from free list
-		; create new free entry
-		; add to list
-	; add block to used list
+	add r4 r3 8
+	stw @r4 r2 ; next.prevOffset = this.prevOffset
 
-.__nextfree
+	;
+	; Do we need to split?
+	;
+	; +--------------------+     +--------+-----------+
+	; |      This Obj      |  => |  This  |  New Free |
+	; +--------------------+     +--------+-----------+
+	; ^        ^           ^     ^        ^           ^
+	; '--------'-----------'     '--------'-----------'
+	; Requested   Leftover       Requested   Leftover
+	;   Size       Space           Size       Space
+	;  
+	ldw r2 @r1 ; this.length
+	add r3 r0 .__heapSmallest
+	cmp r2 r3
+	jl .__l_malloc_attach
 
-; return to caller
-ldw r4 sp
-add sp sp 2
-jmp r4
+		;
+		; Initialize a new trailer for "this".
+		;
+		add r2 r1 .__heapHeader
+		add r2 r2 r0 ; new trailer for "this".
+		stw @r2 r1   ; trailer.headerOffset = this
 
-; globals
-export .__heapOffset
-w 0x0 ; Heap Offset
+		;
+		; Initialize fields of new free object header.
+		;
+	 	add r2 r2 .__heapTrailer ; (new) New free object header.
+
+		ldw r3 @r1
+		sub r3 r3 r0                   ; tmp = this.size - requestedSize
+		sub r3 r3 .__heapHeaderTrailer ; tmp = tmp - .__heapHeaderTrailer
+		stw @r2 r3                     ; new.size = tmp
+
+		add r3 r2 r3
+		add r3 r3 .__heapHeader        ; Trailer for new free object.
+		stw @r3 r2                     ; trailer.headerOffset = new
+
+		;
+		; Attach new free object to free list.
+		;
+		add r3 r2 4
+		stw @r3 0 ; new.prevOffset = 0
+
+		mov r3 .__heapOffset
+		add r3 r3 4
+		ldw r3 @r3 ; super.freeOffset
+
+		add r4 r2 8
+		stw @r4 r3 ; new.nextOffset = super.freeOffset
+
+		mov r3 .__heapOffset
+		add r3 r3 4
+		stw @r3 r2 ; super.freeOffset = new
+
+		;
+		; Update "this" object's size.
+		;
+		stw @r1 r0 ; this.size = requestedSize
+
+	;
+	; Attach this object to used list.
+	;
+	.__l_malloc_attach
+	add r2 r1 4
+	stw @r2 0   ; this.prevOffset = 0
+
+	mov r3 .__heapOffset
+	add r3 r3 8
+	ldw r4 @r3 ; super.usedOffset
+	add r2 r1 8
+	stw @r2 r4 ; this.nextOffset = super.usedOffset
+	stw @r3 r1 ; super.usedOffset = this
+
+	.__l_malloc_return ; Return to caller.
+	mov r3 r1 ; Return address of new block.
+	ldw r4 sp
+	add sp sp 2
+	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Free a region of dynamically allocated memory.
@@ -94,10 +194,10 @@ w 0x0 ; Heap Offset
 ; in r0 address of allocation
 export .free
 
-; return to caller
-ldw r4 sp
-add sp sp 2
-jmp r4
+	; return to caller
+	ldw r4 sp
+	add sp sp 2
+	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The length must be a multiple of the word size.
@@ -108,22 +208,23 @@ jmp r4
 ; r2 length
 export .memcpy
 
-.__copyword
+	.__copyword
 
-; copy word from source to destination
-ldw r3 r1
-stw r0 r3
+	; copy word from source to destination
+	ldw r3 r1
+	stw r0 r3
 
-sub r2 r2 2
-add r0 r0 2
-add r1 r1 2
+	sub r2 r2 2
+	add r0 r0 2
+	add r1 r1 2
 
-bnz .__copyword r2
+	cmp r2 0
+	jnz .__copyword
 
-; return to caller
-ldw r4 sp
-add sp sp 2
-jmp r4
+	; return to caller
+	ldw r4 sp
+	add sp sp 2
+	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The length must be a multiple of the word size.
@@ -133,20 +234,21 @@ jmp r4
 ; r2 length
 export .memset
 
-.__setword
+	.__setword
 
-; set word to given value
-stw r0 r1
+	; set word to given value
+	stw r0 r1
 
-sub r2 r2 2
-add r0 r0 2
+	sub r2 r2 2
+	add r0 r0 2
 
-bnz .__setword r2
+	cmp r2 0
+	jnz .__setword
 
-; return to caller
-ldw r4 sp
-add sp sp 2
-jmp r4
+	; return to caller
+	ldw r4 sp
+	add sp sp 2
+	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The length must be a multiple of the word size.
@@ -155,22 +257,23 @@ jmp r4
 ; out r3 length
 export .strlen
 
-mov r3 0
+	mov r3 0
 
-.__countchar
+	.__countchar
 
-ldb r2 r0
-add r3 r3 1
-add r0 r0 1
+	ldb r2 r0
+	add r3 r3 1
+	add r0 r0 1
 
-bnz .__countchar r2
+	cmp r2 0
+	jnz .__countchar
 
-sub r3 r3 1
+	sub r3 r3 1
 
-; return to caller
-ldw r4 sp
-add sp sp 2
-jmp r4
+	; return to caller
+	ldw r4 sp
+	add sp sp 2
+	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The length must be a multiple of the word size.
@@ -179,16 +282,17 @@ jmp r4
 ; r1 source address
 export .strcpy
 
-.__copychar
+	.__copychar
 
-ldb r2 r1
-stw r0 r2
-add r0 r0 1
-add r1 r1 1
+	ldb r2 r1
+	stw r0 r2
+	add r0 r0 1
+	add r1 r1 1
 
-bnz .__copychar r2
+	cmp r2 0
+	jnz .__copychar
 
-; return to caller
-ldw r4 sp
-add sp sp 2
-jmp r4
+	; return to caller
+	ldw r4 sp
+	add sp sp 2
+	jmp r4

@@ -6,21 +6,19 @@
 ;
 
 .kernel 0x0
-.kstack	0x1000
-.mmapIO 0x2000
 .stdlib 0x3000
 .bios	0x4000
+.tmp_sd 0x5000
 
-.sd_kernel_data 0x5C
+.sd_kernel_data 0x60
 
 .fs_super_size		0x10
-.fs_header_size		0x4C
-.fs_overhead		0x50
+.fs_header_size		0x50
+.fs_overhead		0x54
 
 ; initialize the stack
 mov ba .bios
-mov sp 0x900
-sub sp sp 4 ;DEBUG: so memory dump lines up for easy reading
+mov sp 0x1000
 
 ;
 ; Initialize the SD card.
@@ -46,9 +44,9 @@ jmp .SDread
 ; Get the kernel size (r5) and length (r6) from the header.
 ;
 ldw r6 sp
-add sp sp 8
+add sp sp 12
 ldw r5 sp
-add sp sp 68
+add sp sp .fs_header_size+-12
 
 ;
 ; Copy kernel into main memory.
@@ -82,9 +80,9 @@ jmp .SDread
 ;
 ; Get the stdlib size (r5)
 ;
-add sp sp 8
+add sp sp 12
 ldw r5 sp
-add sp sp 68
+add sp sp .fs_header_size+-12
 
 ;
 ; Copy standard library into main memory.
@@ -100,17 +98,18 @@ jmp .SDread
 ;
 ; Transfer control to the kernel.
 ;
-jmp @0x0
+mov ba 0x0
+jmp 0x0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Initialize SD card for SPI mode.
 ;
 .SDinit
 
-; return to caller
-ldw r4 sp
-add sp sp 4
-jmp r4
+	; return to caller
+	ldw r4 sp
+	add sp sp 4
+	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Read count bytes from the SD card and write them to main memory.
@@ -120,28 +119,29 @@ jmp r4
 ; r2 count (bytes)
 .SDread
 
-; CMD17 for READ_SINGLE_BLOCK
-; Send command frame.
-; Receive command response.
-; Receive data packet (data token + data block + crc)
+	; CMD17 for READ_SINGLE_BLOCK
+	; Send command frame.
+	; Receive command response.
+	; Receive data packet (data token + data block + crc)
 
-; take source address and add the temporary offset to it
-add r1 r1 0x5000
+	; take source address and add the temporary offset to it
+	add r1 r1 .tmp_sd
 
-.copy
-bez .endcopy r2
-ldb r3 @r1
-stb @r0 r3
-add r0 r0 1
-add r1 r1 1
-sub r2 r2 1
-jmp .copy
-.endcopy
+	.copy
+	cmp r2 0
+	jz .endcopy
+		ldb r3 @r1
+		stb @r0 r3
+		add r0 r0 1
+		add r1 r1 1
+		sub r2 r2 1
+		jmp .copy
 
-; return to caller
-ldw r4 sp
-add sp sp 4
-jmp r4
+	.endcopy
+	; return to caller
+	ldw r4 sp
+	add sp sp 4
+	jmp r4
 
 ; The stack will begin after the code.
 .stack

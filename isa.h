@@ -4,7 +4,7 @@
 //NOTICE:
 // This file is parsed by the assembler so be careful.
 
-// Big Endian
+// Little endian
 
 // Registers
 // r0 to r7  General Purpose
@@ -15,10 +15,10 @@
 
 // flags Register
 // nzvc----
-#define FL_N 0b10000000 // Negative
-#define FL_Z 0b01000000 // Zero
-#define FL_V 0b00100000 // Overflow
-#define FL_C 0b00010000 // Carry
+#define FL_N 0b00000001 // Negative
+#define FL_Z 0b00000010 // Zero
+#define FL_V 0b00000100 // Overflow
+#define FL_C 0b00001000 // Carry
 
 // Addressing Modes
 #define MODE_OPERAND 0b00000001
@@ -54,13 +54,13 @@
 #define lsl  0b00010000 // 2  d[r]   l[r]  r[r,c]
 #define lsr  0b00010001 // 2  d[r]   l[r]  r[r,c]
 
-#define bez  0b00010010 // 0  d[@,r,c] l[r]
-#define bnz  0b00010011 // 0  d[@,r,c] l[r]
-#define ble  0b00010100 // 0  d[@,r,c] l[r]
-#define bge  0b00010101 // 0  d[@,r,c] l[r]
-#define bne  0b00010110 // 0  d[@,r,c] l[r]  r[r]
-#define beq  0b00010111 // 0  d[@,r,c] l[r]  r[r]
-#define jmp  0b00011000 // 0  d[@,r,c]
+// Jump / conditional branches
+#define cmp  0b00010010 // 2  d[r] src[r,c]
+#define jmp  0b00010011 // 0  d[@,r,c]
+#define jz   0b00010100 // 0  d[@,r,c]
+#define jnz  0b00010101 // 0  d[@,r,c]
+#define jl   0b00010110 // 0  d[@,r,c]
+#define jg   0b00010111 // 0  d[@,r,c]
 
 #define in   0b00011001
 #define out  0b00011010

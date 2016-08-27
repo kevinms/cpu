@@ -18,7 +18,7 @@ syn keyword asmType add sub adc sbc mul div
 syn keyword asmType ldw ldb stw stb
 syn keyword asmType mov
 syn keyword asmType and or xor nor lsl lsr
-syn keyword asmType bez bnz ble bge bne beq jmp
+syn keyword asmType cmp jmp jz jnz jl jg
 syn keyword asmType in out
 syn keyword asmType die
 
