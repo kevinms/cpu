@@ -58,6 +58,15 @@ stw sp .ra_task
 jmp .malloc
 .ra_task
 
+;
+; Allocate another one!
+;
+mov r0 .task_size
+sub sp sp 4
+stw sp .ra_task2
+jmp .malloc
+.ra_task2
+
 die
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

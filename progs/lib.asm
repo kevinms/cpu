@@ -103,11 +103,24 @@ export .malloc
 	ldw r2 @r2  ; this.prevOffset
 	ldw r3 @r3  ; this.nextOffset
 
-	add r4 r2 8
-	stw @r4 r3 ; prev.nextOffset = this.nextOffset
+	cmp r2 0
+	jnz .__l_malloc_freehead
+		ldw r4 @.__heapOffset
+		add r4 r4 4
+		stw @r4 r3 ; super.freeOffset = this.nextOffset
+	.__l_malloc_freehead
 
-	add r4 r3 8
-	stw @r4 r2 ; next.prevOffset = this.prevOffset
+	cmp r2 0
+	jz .__l_malloc_noprev
+		add r4 r2 8
+		stw @r4 r3 ; prev.nextOffset = this.nextOffset
+	.__l_malloc_noprev
+
+	cmp r3 0
+	jz .__l_malloc_nonext
+		add r4 r3 8
+		stw @r4 r2 ; next.prevOffset = this.prevOffset
+	.__l_malloc_nonext
 
 	;
 	; Do we need to split?
@@ -134,6 +147,7 @@ export .malloc
 
 		;
 		; Initialize fields of new free object header.
+		; r2 - (new) free object offset
 		;
 	 	add r2 r2 .__heapTrailer ; (new) New free object header.
 
@@ -152,14 +166,14 @@ export .malloc
 		add r3 r2 4
 		stw @r3 0 ; new.prevOffset = 0
 
-		mov r3 .__heapOffset
+		ldw r3 @.__heapOffset
 		add r3 r3 4
 		ldw r3 @r3 ; super.freeOffset
 
 		add r4 r2 8
 		stw @r4 r3 ; new.nextOffset = super.freeOffset
 
-		mov r3 .__heapOffset
+		ldw r3 @.__heapOffset
 		add r3 r3 4
 		stw @r3 r2 ; super.freeOffset = new
 
@@ -175,7 +189,7 @@ export .malloc
 	add r2 r1 4
 	stw @r2 0   ; this.prevOffset = 0
 
-	mov r3 .__heapOffset
+	ldw r3 @.__heapOffset
 	add r3 r3 8
 	ldw r4 @r3 ; super.usedOffset
 	add r2 r1 8
