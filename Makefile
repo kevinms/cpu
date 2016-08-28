@@ -3,6 +3,7 @@ all:
 	gcc -Wall -g emulator.c -o emulator
 	gcc -Wall -g fs.c -o fs
 	gcc -Wall -g heap.c -o heap
+	gcc -Wall -g debugger.c -lncurses -o debugger
 
 os: bios lib kernel
 	echo "Building full OS stack."
