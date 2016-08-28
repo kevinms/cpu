@@ -23,4 +23,4 @@ kernel:
 	./assembler.py -a progs/all.kernel.asm -b progs/kernel.bin > progs/kernel.rom
 
 clean:
-	rm -f emulator fs
+	rm -f emulator fs heap
