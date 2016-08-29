@@ -59,13 +59,18 @@ static Window *createWindow(Window *p, int h, int w, int y, int x, char *title)
 	win->h = h;
 	win->x = x;
 	win->y = y;
-	win->title = strdup(title);
+	if (title != NULL) {
+		win->title = strdup(title);
+	}
 
 	if ((win->wn = subwin(p->wn, win->h, win->w, win->y, win->x)) == NULL) {
 		fprintf(stderr, "Can't create register window.\n");
 		abort();
 	}
-    mvwaddstr(win->wn, 1, (win->w - strlen(win->title)) / 2, win->title);
+
+	if (title != NULL) {
+    	mvwaddstr(win->wn, 1, (win->w - strlen(win->title)) / 2, win->title);
+	}
 
 	return win;
 }
@@ -139,7 +144,7 @@ int loadDebugInfo(char *fileName, uint32_t baseAddr)
 	int lineNum, progOffset;
 	i = 0;
 	while ((fscanf(f, "%X %X", &lineNum, &progOffset) == 2) && !feof(f)) {
-		fprintf(stderr, "0x%X 0x%X\n", lineNum, progOffset);
+		//fprintf(stderr, "0x%X 0x%X\n", lineNum, progOffset);
 		i++;
 	}
 	fseek(f, 0, SEEK_SET);
@@ -196,7 +201,7 @@ ERROR:
 	return -1;
 }
 
-static int drawCodeWindow(Window *code, int progOffset)
+static int updateCodeWindow(Window *code, int progOffset)
 {
 	int i;
 	static int lineNum = 0;
@@ -238,9 +243,12 @@ static int drawCodeWindow(Window *code, int progOffset)
 	/*
 	 * Print window title.
 	 */
+	wattron(code->wn, A_BOLD);
 	wattron(code->wn, COLOR_PAIR(3));
 	mvwprintw(code->wn, 0, 0, "%4s", info->sourceFile);
+	wclrtoeol(code->wn);
 	wattroff(code->wn, COLOR_PAIR(3));
+	wattroff(code->wn, A_BOLD);
 
 	/*
 	 * Fill window with source lines centered around lineNum.
@@ -252,8 +260,10 @@ static int drawCodeWindow(Window *code, int progOffset)
 	}
 	for (i = 0; i < maxLines && nextLine < info->lineCount; i++, nextLine++) {
 		wattron(code->wn, COLOR_PAIR(1));
+		wattron(code->wn, A_BOLD);
 		mvwprintw(code->wn, 1 + i, 2, "%4d", nextLine + 1);
 		wattroff(code->wn, COLOR_PAIR(1));
+		wattroff(code->wn, A_BOLD);
 
 		if (nextLine == lineNum) {
 			/*
@@ -293,6 +303,48 @@ static int drawCodeWindow(Window *code, int progOffset)
 
     wrefresh(code->wn);
 	
+	return 0;
+}
+
+static int updateRegsWindow(Window *regs, struct cpuState *cpu)
+{
+	/*
+	 * Print value of each register.
+	 */
+	int i;
+	int maxRegStr = strlen("r15: -0x0000000000");
+	for (i = 0; i < 16; i++) {
+		int col = i >= 8 ? 1 : 0;
+		char buf[256];
+		sprintf(buf, "r%d: 0x%" PRIX32, i, cpu->r[i]);
+		sprintf(buf+strlen(buf), "%*s", (int)maxRegStr - (int)strlen(buf), " ");
+    	mvwaddstr(regs->wn, 3 + (i % 8), 1 + col * maxRegStr, buf);
+	}
+
+	wrefresh(regs->wn);
+
+	return 0;
+}
+
+static int updateShellWindow(Window *shell, struct cpuState *cpu)
+{
+	char buf[256] = {0};
+
+	/*
+	 * Capture the next shell command.
+	 */
+	echo();
+	mvwprintw(shell->wn, shell->h - 2, 2, "#> ");
+	mvwgetstr(shell->wn, shell->h - 2, 5, buf);
+	noecho();
+	wscrl(shell->wn, 1);
+	wrefresh(shell->wn);
+
+	/*
+	 * Execute the command.
+	 */
+	
+
 	return 0;
 }
 
@@ -354,10 +406,10 @@ int initTUI()
 	w = top.w;
 	y = code->h + regs->h;
 	h = top.h - y;
-	shell = createWindow(&top, h, w, y, 0, "Shell");
-	box(shell->wn, 0, 0);
+	shell = createWindow(&top, h, w, y, 0, NULL);
+	scrollok(shell->wn, TRUE);
 
-	drawCodeWindow(code, 0);
+	updateCodeWindow(code, 0);
 
     refresh();
 
@@ -389,16 +441,11 @@ void freeTUI()
  * We happen to know that fits in an "int" on this 64 bit machine.
  * This must change when the code becomes self hosted.
  */
-int updateTUI(int progOffset)
+int updateTUI(struct cpuState *cpu)
 {
-	int ch;
-
-	drawCodeWindow(code, progOffset);
-
-    ch = getch();
-
-	mvwprintw(shell->wn, 3, 2, "Key entered: %c", ch);
-	wrefresh(shell->wn);
+	updateCodeWindow(code, cpu->pc);
+	updateRegsWindow(regs, cpu);
+	updateShellWindow(shell, cpu);
 
 	return 0;
 }

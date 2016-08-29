@@ -13,84 +13,13 @@
 #include <getopt.h>
 
 #include "isa.h"
+#include "cpu.h"
 #include "debugger.h"
 
 #define log(...) \
 	do { \
-		sprintf(msg, ##__VA_ARGS__); \
+		sprintf(cpu.msg, ##__VA_ARGS__); \
 	} while(0)
-
-struct flags {
-	uint32_t n : 1, // negative
-	         z : 1, // zero
-	         o : 1, // overflow
-	         c : 1; // carry
-};
-
-/*
- * Registers:
- *
- * r0  to r10      General Purpose
- *        r11  sp  Stack Pointer
- *        r12  ba  Base Address
- *        r13  fl  CPU Flags
- *        r14  c1  Timer 1 Counter
- *        r15  c2  Timer 2 Counter
- */
-#define R_SP r[11]
-#define R_BA r[12]
-#define R_FL r[13]
-#define R_C1 r[14]
-#define R_C2 r[15]
-#define flags (*((struct flags *)(r+13)))
-
-/*
- * Memory Mapped I/O:
- */
-uint32_t mmapIOstart = 0;
-uint32_t mmapIOend = 0; //0x9C
-struct cpuState {
-	/*
-	 * Interrupts.
-	 */
-	uint32_t intGlobalControl;
-	uint32_t intPending;
-	uint32_t intControl;
-	uint32_t intVector[32];
-
-	/*
-	 * Timers (counters).
-	 */
-	uint32_t timerTerminalCount1;
-	uint32_t timerControl1;
-	uint32_t timerTerminalCount2;
-	uint32_t timerControl2;
-} cpu;
-
-#define NUM_REGISTERS 16
-static uint32_t r[NUM_REGISTERS], pc;
-static uint32_t memSize = 32 * 1024 * 1024;
-static uint8_t *mem;
-static char *memoryFile = "emulator.memory";
-
-uint64_t 	ic;
-uint32_t 	nextPC;
-uint32_t	startingPC;
-char		msg[4096];
-int			beInteractive;
-int			tui;
-uint64_t	maxCycles = UINT64_MAX;
-char		*romFile = NULL;
-
-struct instruction {
-	uint8_t op;
-	uint8_t mode;
-	uint8_t reg0;
-	uint8_t reg1;
-
-	uint32_t raw2;
-	uint32_t opr0, opr1, opr2;
-};
 
 struct binary {
 	char *filePath;
@@ -99,7 +28,13 @@ struct binary {
 	struct binary *next;
 };
 
-struct binary *gBinaryList;
+static struct binary *gBinaryList;
+
+static int		beInteractive;
+static int		tui;
+static char		*romFile;
+
+static struct cpuState cpu;
 
 #define byteSwap16(x) \
 	((((x) & 0xFF) << 8) | \
@@ -141,7 +76,7 @@ int openMemoryFile()
 	int openFlags;
 	int mode;
 
-	if (memoryFile == NULL) {
+	if (cpu.memoryFile == NULL) {
 		fprintf(stderr, "Must provide a memory file.\n");
 		return(-1);
 	}
@@ -149,8 +84,8 @@ int openMemoryFile()
 	openFlags = O_RDWR | O_CREAT;
 	mode = S_IRWXU | S_IRWXG;
 
-	if ((fd = open(memoryFile, openFlags, mode)) < -1) {
-		fprintf(stderr, "Can't open %s: %s\n", memoryFile, strerror(errno));
+	if ((fd = open(cpu.memoryFile, openFlags, mode)) < -1) {
+		fprintf(stderr, "Can't open %s: %s\n", cpu.memoryFile, strerror(errno));
 		return(-1);
 	}
 
@@ -162,15 +97,15 @@ int openMemoryFile()
 		close(fd);
 		return(-1);
 	}
-	if (ftruncate(fd, memSize) < 0) {
+	if (ftruncate(fd, cpu.memSize) < 0) {
 		fprintf(stderr, "Can't truncate to %" PRIu32 ": %s\n",
-				memSize, strerror(errno));
+				cpu.memSize, strerror(errno));
 		close(fd);
 		return(-1);
 	}
 
-	if ((mem = mmap(NULL, memSize, PROT_READ | PROT_WRITE,
-					MAP_SHARED, fd, 0)) == MAP_FAILED) {
+	if ((cpu.mem = mmap(NULL, cpu.memSize, PROT_READ | PROT_WRITE,
+						MAP_SHARED, fd, 0)) == MAP_FAILED) {
 		fprintf(stderr, "Can't memory map memory file: %s\n",
 				strerror(errno));
 		close(fd);
@@ -183,13 +118,19 @@ int openMemoryFile()
 
 int initEnvironment()
 {
+	cpu.pc = 0;
+	cpu.mmapIOstart = 0;
+	cpu.mmapIOend = 0; //0x9C
+	cpu.maxCycles = UINT64_MAX;
+	cpu.memSize = 32 * 1024 * 1024;
+	cpu.memoryFile = strdup("emulator.memory");
+
 	if (openMemoryFile() < 0) {
 		return -1;
 	}
-	memset(mem, 0, memSize);
+	memset(cpu.mem, 0, cpu.memSize);
 
-	memset(r, 0, sizeof(r));
-	pc = 0;
+	memset(cpu.r, 0, sizeof(cpu.r));
 
 	return 0;
 }
@@ -242,13 +183,13 @@ int loadBinary(struct binary *binary)
 		exit(1);
 	}
 
-	if ((binary->memoryOffset > memSize) ||
-		(statBuffer.st_size > memSize - binary->memoryOffset)) {
+	if ((binary->memoryOffset > cpu.memSize) ||
+		(statBuffer.st_size > cpu.memSize - binary->memoryOffset)) {
 		fprintf(stderr, "Binary does not fit in memory.\n");
 		exit(1);
 	}
 
-	void *buffer = ((void *)mem) + binary->memoryOffset;
+	void *buffer = ((void *)cpu.mem) + binary->memoryOffset;
 	uint32_t bytesLeft = statBuffer.st_size;
 
 	while (bytesLeft > 0) {
@@ -305,18 +246,18 @@ int loadROM(char *path)
 
 		int c = strlen(buf);
 		if (c == 8) {
-			parse8bit(buf, mem+pc);
-			pc += 1;
+			parse8bit(buf, cpu.mem + cpu.pc);
+			cpu.pc += 1;
 		} else if (c == 16) {
-			parse16bit(buf, mem+pc);
-			pc += 2;
+			parse16bit(buf, cpu.mem + cpu.pc);
+			cpu.pc += 2;
 		} else if (c == 32) {
-			parse32bit(buf, mem+pc);
-			pc += 4;
+			parse32bit(buf, cpu.mem + cpu.pc);
+			cpu.pc += 4;
 		}
 	}
 
-	pc = 0;
+	cpu.pc = 0;
 	fclose(fd);
 	return(returnValue);
 }
@@ -324,7 +265,7 @@ int loadROM(char *path)
 uint32_t
 fetchInst(uint32_t lpc, struct instruction *o)
 {
-	uint8_t *i = mem + lpc;
+	uint8_t *i = cpu.mem + lpc;
 
 	/*
 	 * Decode the instruction into it's logical pieces.
@@ -340,11 +281,11 @@ fetchInst(uint32_t lpc, struct instruction *o)
 	 * Operand 0 and 1 are always register direct.
 	 * Operand 2 is based on the mode bit.
 	 */
-	o->opr0 = r[o->reg0];
-	o->opr1 = r[o->reg1];
+	o->opr0 = cpu.r[o->reg0];
+	o->opr1 = cpu.r[o->reg1];
 	o->opr2 = o->raw2;
 	if ((o->mode & MODE_OPERAND) == OPR_REG) {
-		o->opr2 = r[o->raw2];
+		o->opr2 = cpu.r[o->raw2];
 	}
 
 	return(lpc + 8);
@@ -358,11 +299,11 @@ void dumpMemory(int width)
 	int duplicate;
 
 	duplicate = 0;
-	for (addr = 0; addr < memSize; ++addr) {
+	for (addr = 0; addr < cpu.memSize; ++addr) {
 		if ((addr % width) == 0) {
 			if ((line != NULL) &&
-				(addr + width < memSize) &&
-				(memcmp(line, mem+addr, width) == 0)) {
+				(addr + width < cpu.memSize) &&
+				(memcmp(line, cpu.mem+addr, width) == 0)) {
 				if (duplicate == 0) {
 					printf("\n*");
 					duplicate = 1;
@@ -371,15 +312,15 @@ void dumpMemory(int width)
 				continue;
 			}
 			duplicate = 0;
-			line = mem+addr;
+			line = cpu.mem+addr;
 			printf("\n");
 			printf("0x%.4" PRIX64, addr);
 		}
-		printf(" %.2x", mem[addr]);
-		if ((((addr+1) % width) == 0) || (addr == memSize)) {
+		printf(" %.2x", cpu.mem[addr]);
+		if ((((addr+1) % width) == 0) || (addr == cpu.memSize)) {
 			printf("  >");
 			for (i = width - 1; i >= 0; --i) {
-				char c = mem[addr-i];
+				char c = cpu.mem[addr-i];
 				printf("%c", isgraph(c) ? c : '.');
 			}
 			printf("<");
@@ -409,12 +350,12 @@ void dumpRegisters(int printHeader, uint32_t nextPC, char *message)
 
 	printf("%-25s", message == NULL ? "" : message);
 
-	printf(" %5" PRIX32 " %5" PRIX32 " ", pc, nextPC);
+	printf(" %5" PRIX32 " %5" PRIX32 " ", cpu.pc, cpu.nextPC);
 	printf("%c%c%c%c  ",
 	       R_FL & FL_N ? 'n' : ' ', R_FL & FL_Z ? 'z' : ' ',
 	       R_FL & FL_V ? 'v' : ' ', R_FL & FL_C ? 'c' : ' ');
 	for(i = 0; i < NUM_REGISTERS; i++)
-		printf("%5" PRIX32 " ", r[i]);
+		printf("%5" PRIX32 " ", cpu.r[i]);
 	printf("\n");
 }
 
@@ -519,14 +460,14 @@ int hitBreakpoint()
 	for (bp = bp_list, i = 0; bp != NULL; bp = bp->next, ++i) {
 		switch (bp->type) {
 		case BP_PC:
-			if (pc == (uint32_t)bp->condition) {
-				printf("Hit breakpoint #%" PRIX64 ": PC == 0x%" PRIX32 "\n", i, pc);
+			if (cpu.pc == (uint32_t)bp->condition) {
+				printf("Hit breakpoint #%" PRIX64 ": PC == 0x%" PRIX32 "\n", i, cpu.pc);
 				hitBP = bp;
 			}
 			break;
 		case BP_FINISH: {
 			struct instruction o;
-			fetchInst(pc, &o);
+			fetchInst(cpu.pc, &o);
 
 			if ((o.op == jmp) && ((o.mode & MODE_OPERAND) == OPR_REG) && (o.raw2 == 4)) {
 				printf("Hit breakpoint #%" PRIX64 ": jmp r4\n", i);
@@ -573,7 +514,7 @@ void interactive()
 	}
 
 	if (tui != 0) {
-		updateTUI(pc);
+		updateTUI(&cpu);
 		return;
 	}
 
@@ -613,7 +554,7 @@ void interactive()
 			dumpMemory((int)num);
 		}
 		if (input[0] == 'r') {
-			dumpRegisters(0, nextPC, msg);
+			dumpRegisters(0, cpu.nextPC, cpu.msg);
 		}
 		if (input[0] == 'f') {
 			addBreakpoint("fin", 0, 1);
@@ -723,10 +664,10 @@ void parseArgs(int argc, char **argv)
 				romFile = optarg;
 				break;
 			case 'b':
-				addBinary(optarg, 1);
+				addBinary(optarg, 0);
 				break;
 			case 'g':
-				addBinary(optarg, 0);
+				addBinary(optarg, 1);
 				break;
 			case 'i':
 				beInteractive = 1;
@@ -736,10 +677,10 @@ void parseArgs(int argc, char **argv)
 				tui = 1;
 				break;
 			case 'c':
-				maxCycles = strtoull(optarg, NULL, 0);
+				cpu.maxCycles = strtoull(optarg, NULL, 0);
 				break;
 			case 'p':
-				startingPC = strtoull(optarg, NULL, 0);
+				cpu.startingPC = strtoull(optarg, NULL, 0);
 				break;
 			case 'h':
 				usage(argc, argv);
@@ -844,22 +785,22 @@ uint32_t *mmapIOregister(uint32_t address)
 
 uint8_t read8bit(uint32_t address)
 {
-	return mem[address];
+	return cpu.mem[address];
 }
 
 uint32_t read32bit(uint32_t address)
 {
-	if (address < mmapIOstart || address >= mmapIOend) {
+	if (address < cpu.mmapIOstart || address >= cpu.mmapIOend) {
 		/*
 		 * Normal memory access.
 		 */
-		return *(uint32_t *)(mem + address);
+		return *(uint32_t *)(cpu.mem + address);
 	}
 
 	/*
 	 * Anything else must be memory mapped I/O.
 	 */
-	address -= mmapIOstart;
+	address -= cpu.mmapIOstart;
 
 	uint32_t *reg = mmapIOregister(address);
 
@@ -873,16 +814,16 @@ uint32_t read32bit(uint32_t address)
 
 void write8bit(uint32_t address, uint8_t data)
 {
-	mem[address] = data;
+	cpu.mem[address] = data;
 }
 
 void write32bit(uint32_t address, uint32_t data)
 {
-	if (address < mmapIOstart || address >= mmapIOend) {
+	if (address < cpu.mmapIOstart || address >= cpu.mmapIOend) {
 		/*
 		 * Normal memory access.
 		 */
-		*(uint32_t *)(mem + address) = data;
+		*(uint32_t *)(cpu.mem + address) = data;
 
 		return;
 	}
@@ -890,7 +831,7 @@ void write32bit(uint32_t address, uint32_t data)
 	/*
 	 * Anything else must be memory mapped I/O.
 	 */
-	address -= mmapIOstart;
+	address -= cpu.mmapIOstart;
 
 	uint32_t *reg = mmapIOregister(address);
 
@@ -934,18 +875,18 @@ int main(int argc, char **argv)
 		initTUI();
 	}
 
-	ic = 0;
-	pc = startingPC;
+	//ic = 0;
+	cpu.pc = cpu.startingPC;
 	stop = 0;
 
 	dumpRegisters(1, 0, "");
 
-	while (!stop && (maxCycles-- > 0)) {
+	while (!stop && (cpu.maxCycles-- > 0)) {
 
 		interactive();
-		fetchInst(pc, &o);
+		fetchInst(cpu.pc, &o);
 
-		nextPC = pc + 8;
+		cpu.nextPC = cpu.pc + 8;
 
 		R_C1++;
 		R_C2++;
@@ -961,33 +902,33 @@ int main(int argc, char **argv)
 		 */
 		case add:
 			log("add r[%" PRIu32 "] = %" PRIX32 " + %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 + o.opr2;
+			cpu.r[o.reg0] = o.opr1 + o.opr2;
 			if ((UINT32_MAX - o.opr1) < o.opr2) {
 				R_FL |= FL_C;
 			}
 			break;
 		case sub:
 			log("sub r[%" PRIu32 "] = %" PRIX32 " - %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 - o.opr2;
+			cpu.r[o.reg0] = o.opr1 - o.opr2;
 			break;
 		case adc:
 			log("adc r[%" PRIu32 "] = %" PRIX32 " + %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 + o.opr2 + (R_FL & FL_C);
+			cpu.r[o.reg0] = o.opr1 + o.opr2 + (R_FL & FL_C);
 			if ((UINT32_MAX - o.opr1) < o.opr2) {
 				R_FL |= FL_C;
 			}
 			break;
 		case sbc:
 			log("sbc r[%" PRIu32 "] = %" PRIX32 " - %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 - o.opr2;
+			cpu.r[o.reg0] = o.opr1 - o.opr2;
 			break;
 		case mul:
 			log("mul r[%" PRIu32 "] = %" PRIX32 " * %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 * o.opr2;
+			cpu.r[o.reg0] = o.opr1 * o.opr2;
 			break;
 		case div:
 			log("div r[%" PRIu32 "] = %" PRIX32 " / %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 / o.opr2;
+			cpu.r[o.reg0] = o.opr1 / o.opr2;
 			break;
 
 		/*
@@ -996,12 +937,12 @@ int main(int argc, char **argv)
 		case ldb:
 			address = getAddress(o.mode, o.opr2);
 			log("ldb r[%" PRIu32 "] = mem[%" PRIX32 "]", o.reg0, address);
-			r[o.reg0] = read8bit(address);
+			cpu.r[o.reg0] = read8bit(address);
 			break;
 		case ldw:
 			address = getAddress(o.mode, o.opr2);
 			log("ldw r[%" PRIu32 "] = mem[%" PRIX32 "]", o.reg0, address);
-			r[o.reg0] = littleToHost32(read32bit(address));
+			cpu.r[o.reg0] = littleToHost32(read32bit(address));
 			break;
 		case stb:
 			address = getAddress(o.mode, o.opr0);
@@ -1015,7 +956,7 @@ int main(int argc, char **argv)
 			break;
 		case mov:
 			log("mov r[%" PRIu32 "] = %" PRIX32, o.reg0, o.opr2);
-			r[o.reg0] = o.opr2;
+			cpu.r[o.reg0] = o.opr2;
 			break;
 
 		/*
@@ -1023,27 +964,27 @@ int main(int argc, char **argv)
 		 */
 		case and:
 			log("and r[%" PRIu32 "] = %" PRIX32 " & %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 & o.opr2;
+			cpu.r[o.reg0] = o.opr1 & o.opr2;
 			break;
 		case or:
 			log("or r[%" PRIu32 "] = %" PRIX32 " | %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 | o.opr2;
+			cpu.r[o.reg0] = o.opr1 | o.opr2;
 			break;
 		case xor:
 			log("xor r[%" PRIu32 "] = %" PRIX32 " ^ %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 ^ o.opr2;
+			cpu.r[o.reg0] = o.opr1 ^ o.opr2;
 			break;
 		case nor:
 			log("nor r[%" PRIu32 "] = ~%" PRIX32 " & ~%" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = ~o.opr1 & ~o.opr2;
+			cpu.r[o.reg0] = ~o.opr1 & ~o.opr2;
 			break;
 		case lsl:
 			log("lsl r[%" PRIu32 "] = %" PRIX32 " << %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 << o.opr2;
+			cpu.r[o.reg0] = o.opr1 << o.opr2;
 			break;
 		case lsr:
 			log("lsr r[%" PRIu32 "] = %" PRIX32 " >> %" PRIX32, o.reg0, o.opr1, o.opr2);
-			r[o.reg0] = o.opr1 >> o.opr2;
+			cpu.r[o.reg0] = o.opr1 >> o.opr2;
 			break;
 
 		/*
@@ -1051,42 +992,42 @@ int main(int argc, char **argv)
 		 */
 		case cmp:
 			log("cmp r[%" PRIu32 "] %" PRIX32, o.reg0, o.opr2);
-			uint32_t temp = r[o.reg0] - o.opr2;
+			uint32_t temp = cpu.r[o.reg0] - o.opr2;
 			// flags.n = temp & (0x1 << 31); // enable when signed arithmetic is supported
 			flags.z = (temp == 0) ? 1 : 0;
-			flags.c = r[o.reg0] < o.opr2; // borrow?
+			flags.c = cpu.r[o.reg0] < o.opr2; // borrow?
 			break;
 		case jmp:
 			address = getAddress(o.mode, o.opr2);
 			log("jmp %" PRIX32, address);
-			nextPC = address;
+			cpu.nextPC = address;
 			break;
 		case jz:
 			address = getAddress(o.mode, o.opr2);
 			log("jz %" PRIX32, address);
 			if (flags.z != 0) {
-				nextPC = address;
+				cpu.nextPC = address;
 			}
 			break;
 		case jnz:
 			address = getAddress(o.mode, o.opr2);
 			log("jnz %" PRIX32, address);
 			if (flags.z == 0) {
-				nextPC = address;
+				cpu.nextPC = address;
 			}
 			break;
 		case jl:
 			address = getAddress(o.mode, o.opr2);
 			log("jl %" PRIX32, address);
 			if (flags.c != 0) {
-				nextPC = address;
+				cpu.nextPC = address;
 			}
 			break;
 		case jg:
 			address = getAddress(o.mode, o.opr2);
 			log("jg %" PRIX32, address);
 			if (flags.c == 0) {
-				nextPC = address;
+				cpu.nextPC = address;
 			}
 			break;
 
@@ -1103,11 +1044,11 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		dumpRegisters(0, nextPC, msg);
+		dumpRegisters(0, cpu.nextPC, cpu.msg);
 
-		pc = nextPC;
-		if (pc > memSize) {
-			fprintf(stderr, "ERROR: Can't access memory at 0x%" PRIX32 "\n", pc);
+		cpu.pc = cpu.nextPC;
+		if (cpu.pc > cpu.memSize) {
+			fprintf(stderr, "ERROR: Can't access memory at 0x%" PRIX32 "\n", cpu.pc);
 			stop = 1;
 			break;
 		}
