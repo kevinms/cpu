@@ -14,14 +14,14 @@ os: bios lib kernel
 	./fs -i sd.img -l
 
 bios:
-	./assembler.py -a progs/bios.asm -b progs/bios.bin > progs/bios.rom
+	./assembler.py -a progs/bios.asm --binary --debug > progs/bios.rom
 
 lib:
-	./assembler.py -a progs/lib.asm -b progs/lib.bin -e progs/lib.sym -s 0x3000 > progs/lib.rom
+	./assembler.py -a progs/lib.asm --binary --debug --symbols -s 0x3000 > progs/lib.rom
 
 kernel:
 	cat progs/lib.sym progs/kernel.asm > progs/all.kernel.asm
-	./assembler.py -a progs/all.kernel.asm -b progs/kernel.bin > progs/kernel.rom
+	./assembler.py -a progs/all.kernel.asm --binary --debug > progs/kernel.rom
 
 clean:
 	rm -f emulator fs heap

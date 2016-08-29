@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import getopt, sys, re
+import getopt, sys, re, os
 import struct
 
 iset = {}   # instruction set
@@ -12,7 +12,7 @@ baseAddress = stackAddress = stackSize = heapAddress = heapSize = 0x0
 header = False
 
 doAssemble = False
-binaryFile = asciiFile = symbolFile = None
+binaryFile = asciiFile = symbolFile = debugFile = None
 
 def error(msg):
 	print >> sys.stderr, msg
@@ -41,6 +41,10 @@ def output(msg, trailer = ' '):
 def exportSymbol(label):
 	if symbolFile is not None:
 		symbolFile.write(".%s 0x%X\n" % (label, labels[label]))
+
+def exportDebug(lineNum, progOffset):
+	if debugFile is not None:
+		debugFile.write("0x%X 0x%X\n" % (lineNum, progOffset))
 
 def parseISA():
 	parse = 0
@@ -117,6 +121,7 @@ def loadLabels(source):
 		elif tokens[0] == 'b':
 			progOffset += 1
 		else:
+			exportDebug(lineNum, progOffset);
 			progOffset += 8
 
 def parseOperand(opr, modes, line, bits):
@@ -253,10 +258,11 @@ options = [
 	('h','help','This help.'),
 	('a:','assemble=','Translate assembly language into machine code.'),
 	('d:','disassemble=','Translate machine code into assembly language.'),
-	('b:','binary=','Output machine code to binary file.'),
-	('t:','text=','Output machine code to ascii binary file.'),
-	('s:','base-address=','Base address where the binary will start in memory.'),
-	('e:','export-symbols=','Output exported symbols to ABI file.')]
+	('b','binary','Output machine code to binary file.'),
+	('t','text','Output machine code to ascii binary file.'),
+	('e','symbols','Output exported symbols to ABI file.'),
+	('g','debug','Output debug info to file.'),
+	('s:','base-address','Base address where the binary will start in memory.')]
 shortOpt = "".join([opt[0] for opt in options])
 longOpt = [opt[1] for opt in options]
 
@@ -269,8 +275,9 @@ def usage():
 	sys.exit(1)
 
 def main():
-	global binaryFile, asciiFile, symbolFile
+	global binaryFile, asciiFile, symbolFile, debugFile
 	global baseAddress
+	base = None
 
 	try:
 		opts, args = getopt.getopt(sys.argv[1:], shortOpt, longOpt)
@@ -284,23 +291,20 @@ def main():
 		if o in ('-h', '--help'):
 			usage()
 		elif o in ('-a', '--assemble'):
-			#inFile = os.path.basename(a)
-			#base = os.path.splitext(inFile)[0]
-			#asciiFile = base + '.rom'
-			#binaryFile = base + '.bin'
+			base = os.path.splitext(a)[0]
 			source = open(a, "r")
 			doAssemble = True
 		elif o in ('-d', '--disassemble'):
 			rom = open(a, "r");
 
 		elif o in ('-b', '--binary'):
-			binaryFile = open(a, "wb")
-			if binaryFile is not None:
-				debug("Using binary file " + a)
+			binaryFile = open(base + '.bin', "wb")
 		elif o in ('-t', '--text'):
-			asciiFile = open(a, "w")
-		elif o in ('-e', '--export-symbols'):
-			symbolFile = open(a, "w")
+			asciiFile = open(base + '.rom', "w")
+		elif o in ('-e', '--symbols'):
+			symbolFile = open(base + '.sym', "w")
+		elif o in ('-g', '--debug'):
+			debugFile = open(base + '.debug', "w")
 
 		elif o in ('-s', '--base-address'):
 			baseAddress = int(a, 0)
