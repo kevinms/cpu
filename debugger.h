@@ -4,5 +4,6 @@
 int initTUI();
 void freeTUI();
 int updateTUI(int progOffset);
+int loadDebugInfo(char *fileName, uint32_t baseAddr);
 
 #endif /* __DEBUGGER_H */

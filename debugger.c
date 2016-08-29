@@ -1,8 +1,13 @@
+#define _GNU_SOURCE
 #include <stdlib.h>
 #include <stdio.h>
 #include <curses.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "debugger.h"
 
@@ -10,6 +15,7 @@ typedef struct DebugInfo
 {
 	char *sourceFile;
 	char *debugFile;
+	char *binaryFile;
 
 	char **text;
 	int lineCount;
@@ -17,6 +23,11 @@ typedef struct DebugInfo
 	int *indexLine;
 	int *indexOffset;
 	int indexCount;
+
+	uint32_t binarySize;
+	uint32_t baseAddr;
+
+	struct DebugInfo *next;
 } DebugInfo;
 
 typedef struct Window
@@ -32,7 +43,8 @@ static Window *code;
 static Window *regs;
 static Window *mem;
 static Window *shell;
-static DebugInfo *info;
+
+static DebugInfo *gInfo;
 
 static Window *createWindow(Window *p, int h, int w, int y, int x, char *title)
 {
@@ -58,7 +70,7 @@ static Window *createWindow(Window *p, int h, int w, int y, int x, char *title)
 	return win;
 }
 
-DebugInfo *loadDebugInfo(char *sourceFile, char *debugFile)
+int loadDebugInfo(char *fileName, uint32_t baseAddr)
 {
 	DebugInfo *info;
 	FILE *f;
@@ -70,14 +82,24 @@ DebugInfo *loadDebugInfo(char *sourceFile, char *debugFile)
 	}
 	memset(info, 0, sizeof(*info));
 
-	info->sourceFile = strdup(sourceFile);
-	info->debugFile = strdup(debugFile);
+	char *marker = strrchr(fileName, '.');
+	if (marker == NULL) {
+		fprintf(stderr, "Can't find file extension.\n");
+		goto ERROR;
+	}
+	int len = (uintptr_t)marker - (uintptr_t)fileName;
+	asprintf(&info->sourceFile, "%.*s.asm", len, fileName);
+	asprintf(&info->debugFile, "%.*s.debug", len, fileName);
+	asprintf(&info->binaryFile, "%.*s.bin", len, fileName);
+	fprintf(stderr, "source: %s\n", info->sourceFile);
+	fprintf(stderr, "debug: %s\n", info->debugFile);
+	fprintf(stderr, "binary: %s\n", info->binaryFile);
 
 	/*
 	 * Load all source file lines of text.
 	 */
-	if ((f = fopen(sourceFile, "r")) == NULL) {
-		fprintf(stderr, "Can't open '%s': %s\n", sourceFile, strerror(errno));
+	if ((f = fopen(info->sourceFile, "r")) == NULL) {
+		fprintf(stderr, "Can't open '%s': %s\n", info->sourceFile, strerror(errno));
 		goto ERROR;
 	}
 
@@ -109,8 +131,8 @@ DebugInfo *loadDebugInfo(char *sourceFile, char *debugFile)
 	/*
 	 * Index each lineNum to progOffset mapping.
 	 */
-	if ((f = fopen(debugFile, "r")) == NULL) {
-		fprintf(stderr, "Can't open '%s': %s\n", debugFile, strerror(errno));
+	if ((f = fopen(info->debugFile, "r")) == NULL) {
+		fprintf(stderr, "Can't open '%s': %s\n", info->debugFile, strerror(errno));
 		goto ERROR;
 	}
 
@@ -141,7 +163,18 @@ DebugInfo *loadDebugInfo(char *sourceFile, char *debugFile)
 
 	fclose(f);
 
-	return info;
+	struct stat statBuffer;
+	if (stat(info->binaryFile, &statBuffer) < 0) {
+		fprintf(stderr, "Can't stat '%s': %s\n", info->binaryFile, strerror(errno));
+		goto ERROR;
+	}
+	info->binarySize = statBuffer.st_size;
+
+	info->baseAddr = baseAddr;
+	info->next = gInfo;
+	gInfo = info;
+
+	return 0;
 
 ERROR:
 
@@ -151,6 +184,7 @@ ERROR:
 	if (info != NULL) {
 		free(info->sourceFile);
 		free(info->debugFile);
+		free(info->binaryFile);
 		free(info->indexLine);
 		free(info->indexOffset);
 		if (info->text) {
@@ -159,26 +193,46 @@ ERROR:
 	}
 	free(info);
 
-	return NULL;
+	return -1;
 }
 
 static int drawCodeWindow(Window *code, int progOffset)
 {
 	int i;
 	static int lineNum = 0;
+	DebugInfo *info;
+
+	/*
+	 * Find the source file that matches.
+	 */
+	for (info = gInfo; info != NULL; info = info->next) {
+		if (progOffset >= info->baseAddr && progOffset < info->baseAddr + info->binarySize) {
+			break;
+		}
+	}
+	if (info == NULL) {
+		mvwprintw(shell->wn, 2, 2, "Can't find source file for progOffset:"
+		          " 0x%X", progOffset);
+		return 0;
+	}
 
 	/*
 	 * Brute force search for line number based on program offset
 	 * using the simple array mapping.
 	 */
 	for (i = 0; i < info->indexCount; i++) {
-		if (info->indexOffset[i] == progOffset) {
+		if (info->indexOffset[i] + info->baseAddr == progOffset) {
 			/*
 			 * Found match.
 			 */
 			lineNum = info->indexLine[i];
 			break;
 		}
+	}
+	if (i >= info->indexCount) {
+		mvwprintw(shell->wn, 2, 2, "Can't find offset (0x%X) -> line"
+		          " mapping.\n", progOffset);
+		return 0;
 	}
 
 	/*
@@ -208,7 +262,22 @@ static int drawCodeWindow(Window *code, int progOffset)
 			wattron(code->wn, COLOR_PAIR(2));
 		}
 
-		mvwprintw(code->wn, 1 + i, 7, "%s", info->text[nextLine]);
+		/*
+		 * Count characters to print, expanding tabs.
+		 */
+		int charCount;
+		int expandedCount = 0;
+		for (charCount = 0; charCount < strlen(info->text[nextLine]); charCount++) {
+			int len = 1;
+			if (info->text[nextLine][charCount] == '\t') {
+				len = 4;
+			}
+			if (expandedCount + len >= code->w - 7) {
+				break;
+			}
+			expandedCount += len;
+		}
+		mvwprintw(code->wn, 1 + i, 7, "%.*s", expandedCount, info->text[nextLine]);
 
 		if (nextLine == lineNum) {
 			wattroff(code->wn, COLOR_PAIR(2));
@@ -229,20 +298,22 @@ static int drawCodeWindow(Window *code, int progOffset)
 
 int initTUI()
 {
-	info = loadDebugInfo("progs/add.asm", "progs/add.debug");
-
     if ((top.wn = initscr()) == NULL) {
 		fprintf(stderr, "Error initialising ncurses.\n");
 		exit(1);
     }
 	getmaxyx(top.wn, top.h, top.w);
 
-	if(has_colors() == FALSE) {
+	if (has_colors() == FALSE) {
 		endwin();
 		fprintf(stderr, "Your terminal does not support color\n");
 		exit(1);
 	}
+	if (can_change_color() == FALSE) {
+		fprintf(stderr, "Your terminal does not support changing color\n");
+	}
 	start_color();
+	init_color(COLOR_BLACK, 0, 0, 0);
 	init_pair(1, COLOR_YELLOW, COLOR_BLACK);
 	init_pair(2, COLOR_BLACK, COLOR_WHITE);
 	init_pair(3, COLOR_BLUE, COLOR_BLACK);
@@ -252,6 +323,7 @@ int initTUI()
 	 */
 	noecho();
 	keypad(top.wn, TRUE);
+	set_tabsize(4);
 
 	int i;
 	int w, h;
@@ -260,8 +332,6 @@ int initTUI()
 	w = top.w;
 	h = 2 + top.h / 2;
 	code = createWindow(&top, h, w, 0, 0, "Code");
-
-	drawCodeWindow(code, 0);
 
 	int maxRegStr = strlen("r15: -0x0000000000");
 	w = 2 + 1 + 2 * maxRegStr;
@@ -287,6 +357,7 @@ int initTUI()
 	shell = createWindow(&top, h, w, y, 0, "Shell");
 	box(shell->wn, 0, 0);
 
+	drawCodeWindow(code, 0);
 
     refresh();
 

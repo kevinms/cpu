@@ -95,6 +95,7 @@ struct instruction {
 struct binary {
 	char *filePath;
 	uint32_t memoryOffset;
+	int debugOnly;
 	struct binary *next;
 };
 
@@ -193,7 +194,7 @@ int initEnvironment()
 	return 0;
 }
 
-int addBinary(char *binaryInfo)
+int addBinary(char *binaryInfo, int debugOnly)
 {
 	struct binary *newBinary;
 	char *separator, *path, *offset;
@@ -204,7 +205,7 @@ int addBinary(char *binaryInfo)
 	if (((separator = rindex(binaryInfo, ':')) == NULL) ||
 		(separator == binaryInfo) || (strlen(separator) <= 1)) {
 		fprintf(stderr, "Expected binaryInfo as <filePath>:<memoryOffset>\n");
-		return(-1);
+		return -1;
 	}
 	separator[0] = '\0';
 	path = binaryInfo;
@@ -213,11 +214,12 @@ int addBinary(char *binaryInfo)
 	newBinary = malloc(sizeof(*newBinary));
 	newBinary->filePath = strdup(path);
 	newBinary->memoryOffset = strtoull(offset, NULL, 0);
+	newBinary->debugOnly = debugOnly;
 
 	newBinary->next = gBinaryList;
 	gBinaryList = newBinary;
 
-	return(0);
+	return 0;
 }
 
 int loadBinary(struct binary *binary)
@@ -225,6 +227,9 @@ int loadBinary(struct binary *binary)
 	int		fd;
 	struct stat	statBuffer;
 
+	if (binary->debugOnly != 0) {
+		return 0;
+	}
 	printf("Loading %s at 0x%" PRIX32 "\n", binary->filePath, binary->memoryOffset);
 
 	if ((fd = open(binary->filePath, O_RDONLY)) < 0) {
@@ -252,14 +257,14 @@ int loadBinary(struct binary *binary)
 		if ((bytesRead = read(fd, buffer, bytesLeft)) < 0) {
 			fprintf(stderr, "Can't read %s: %s\n", binary->filePath, strerror(errno));
 			close(fd);
-			return(-1);
+			return -1;
 		}
 
 		bytesLeft -= (uint32_t)bytesRead;
 		buffer += bytesRead;
 	}
 
-	return(0);
+	return 0;
 }
 
 void parse8bit(char *bits, uint8_t *memory)
@@ -653,6 +658,7 @@ void interactive()
 static struct option longopts[] = {
 	{"rom", required_argument, NULL, 'r'},
 	{"binary", required_argument, NULL, 'b'},
+	{"debug", required_argument, NULL, 'g'},
 	{"max-cycles", required_argument, NULL, 'c'},
 	{"interactive", no_argument, NULL, 'i'},
 	{"tui", no_argument, NULL, 't'},
@@ -717,7 +723,10 @@ void parseArgs(int argc, char **argv)
 				romFile = optarg;
 				break;
 			case 'b':
-				addBinary(optarg);
+				addBinary(optarg, 1);
+				break;
+			case 'g':
+				addBinary(optarg, 0);
 				break;
 			case 'i':
 				beInteractive = 1;
@@ -914,6 +923,9 @@ int main(int argc, char **argv)
 			 thisBinary = thisBinary->next) {
 			if (loadBinary(thisBinary) < 0) {
 				return(1);
+			}
+			if (tui != 0) {
+				loadDebugInfo(thisBinary->filePath, thisBinary->memoryOffset);
 			}
 		}
 	}
