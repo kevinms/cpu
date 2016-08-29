@@ -5,7 +5,7 @@
 
 int initTUI();
 void freeTUI();
-int updateTUI(struct cpuState *cpu);
+int updateTUI(struct cpuState *cpu, struct instruction *o);
 int loadDebugInfo(char *fileName, uint32_t baseAddr);
 
 #endif /* __DEBUGGER_H */

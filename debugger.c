@@ -8,8 +8,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #include "debugger.h"
+#include "isa.h"
 
 typedef struct DebugInfo
 {
@@ -45,6 +47,8 @@ static Window *mem;
 static Window *shell;
 
 static DebugInfo *gInfo;
+static int keepGoing;
+static int simpleTUI = 0;
 
 static Window *createWindow(Window *p, int h, int w, int y, int x, char *title)
 {
@@ -201,6 +205,197 @@ ERROR:
 	return -1;
 }
 
+static int shellPrint(const char *fmt, ...)
+{
+	wmove(shell->wn, shell->h - 1, 5);
+
+	va_list argPtr;
+	va_start(argPtr, fmt);
+	vw_printw(shell->wn, fmt, argPtr);
+	fprintf(stderr, fmt, argPtr);
+	va_end(argPtr);
+
+	//wscrl(shell->wn, 1);
+	wrefresh(shell->wn);
+
+	return 0;
+}
+
+#define BP_PC 0
+#define BP_IC 1
+#define BP_MEM_RD 2
+#define BP_MEM_WR 3
+#define BP_MEM_RDWR 4
+#define BP_FINISH 5
+
+struct breakpoint {
+	int type;
+	uint64_t condition;
+	uint64_t maxHits;
+	uint64_t id;
+	struct breakpoint *next;
+};
+
+struct bptype {
+	int type;
+	char *name;
+};
+
+static struct breakpoint *bp_list;
+static uint64_t bp_list_count;
+static struct bptype bp_table[] = {
+	{BP_PC, "pc"},
+	{BP_IC, "ic"},
+	{BP_MEM_RD, "rd"},
+	{BP_MEM_WR, "wr"},
+	{BP_MEM_RDWR, "rdwr"},
+	{BP_FINISH, "fin"}
+};
+
+void dumpMemory(struct cpuState *cpu, int width)
+{
+	int64_t i;
+	uint64_t addr;
+	uint8_t *line = NULL;
+	int duplicate;
+
+	duplicate = 0;
+	for (addr = 0; addr < cpu->memSize; ++addr) {
+		if ((addr % width) == 0) {
+			if ((line != NULL) &&
+				(addr + width < cpu->memSize) &&
+				(memcmp(line, cpu->mem+addr, width) == 0)) {
+				if (duplicate == 0) {
+					shellPrint("\n*");
+					duplicate = 1;
+				}
+				addr += (width-1);
+				continue;
+			}
+			duplicate = 0;
+			line = cpu->mem+addr;
+			shellPrint("\n");
+			shellPrint("0x%.4" PRIX64, addr);
+		}
+		shellPrint(" %.2x", cpu->mem[addr]);
+		if ((((addr+1) % width) == 0) || (addr == cpu->memSize)) {
+			shellPrint("  >");
+			for (i = width - 1; i >= 0; --i) {
+				char c = cpu->mem[addr-i];
+				shellPrint("%c", isgraph(c) ? c : '.');
+			}
+			shellPrint("<");
+		}
+	}
+	shellPrint("\n");
+}
+
+void deleteBreakpoint(uint64_t n)
+{
+	struct breakpoint *bp;
+	struct breakpoint *prev;
+
+	for (bp = bp_list, prev = NULL;
+		 bp != NULL;
+		 prev = bp, bp = bp->next) {
+		if (bp->id == n) {
+			shellPrint("Deleting breakpoint #%" PRIX64 "\n", bp->id);
+			if (prev == NULL) {
+				bp_list = bp->next;
+			} else {
+				prev->next = bp->next;
+			}
+			free(bp);
+			break;
+		}
+	}
+}
+
+void deleteAllBreakpoints()
+{
+	while (bp_list != NULL) {
+		deleteBreakpoint(bp_list->id);
+	}
+}
+
+uint64_t addBreakpoint(char *name, uint64_t condition, uint64_t maxHits)
+{
+	struct breakpoint *bp;
+	int type = -1;
+	int i;
+
+	for(i = 0; i < sizeof(bp_table); ++i) {
+		if (strcmp(bp_table[i].name, name) == 0) {
+			type = bp_table[i].type;
+			break;
+		}
+	}
+	if (type < 0) {
+		shellPrint("Unknown breakpoint type: %d\n", type);
+		return(UINT64_MAX);
+	}
+
+	bp = malloc(sizeof(*bp));
+
+	bp->type = type;
+	bp->condition = condition;
+	bp->maxHits = maxHits;
+	bp->id = bp_list_count;
+
+	bp_list_count++;
+	bp->next = bp_list;
+	bp_list = bp;
+
+	shellPrint("Set breakpoint: %s %" PRIX64 "\n", name, condition);
+
+	return(bp->id);
+}
+
+int hitBreakpoint(struct cpuState *cpu, struct instruction *o)
+{
+	struct breakpoint *hitBP = NULL;
+	struct breakpoint *bp;
+	uint64_t i;
+
+	for (bp = bp_list, i = 0; bp != NULL; bp = bp->next, ++i) {
+		switch (bp->type) {
+		case BP_PC:
+			if (cpu->pc == (uint32_t)bp->condition) {
+				shellPrint("Hit breakpoint #%" PRIX64 ": PC == 0x%" PRIX32 "\n", i, cpu->pc);
+				hitBP = bp;
+			}
+			break;
+		case BP_FINISH: {
+			if ((o->op == jmp) && ((o->mode & MODE_OPERAND) == OPR_REG) && (o->raw2 == 4)) {
+				shellPrint("Hit breakpoint #%" PRIX64 ": jmp r4\n", i);
+				hitBP = bp;
+			}
+			break;
+		}
+		}
+	}
+
+	if (hitBP != NULL && hitBP->maxHits != UINT64_MAX) {
+		hitBP->maxHits--;
+		if (hitBP->maxHits == 0) {
+			deleteBreakpoint(hitBP->id);
+		}
+	}
+
+	return(hitBP != NULL);
+}
+
+void listBreakpoints()
+{
+	struct breakpoint *bp;
+	uint64_t i;
+
+	shellPrint("Breakpoints:\n");
+	for (bp = bp_list, i = 0; bp != NULL; bp = bp->next, ++i) {
+		shellPrint(" #%" PRIX64 " %s == %" PRIX64 "\n", i, bp_table[bp->type].name, bp->condition);
+	}
+}
+
 static int updateCodeWindow(Window *code, int progOffset)
 {
 	int i;
@@ -326,24 +521,232 @@ static int updateRegsWindow(Window *regs, struct cpuState *cpu)
 	return 0;
 }
 
-static int updateShellWindow(Window *shell, struct cpuState *cpu)
+#if 0
+void interactive()
 {
-	char buf[256] = {0};
+	char	input[4096];
+	char	cmd[4096];
+	char	opt1[4096];
+	char	opt2[4096];
+	static char	savedInput[4096] = "s";
+	uint64_t num;
+	static int keepGoing;
 
-	/*
-	 * Capture the next shell command.
-	 */
-	echo();
-	mvwprintw(shell->wn, shell->h - 2, 2, "#> ");
-	mvwgetstr(shell->wn, shell->h - 2, 5, buf);
-	noecho();
-	wscrl(shell->wn, 1);
-	wrefresh(shell->wn);
+	if (hitBreakpoint() != 0) {
+		keepGoing = 0;
+	}
 
-	/*
-	 * Execute the command.
-	 */
-	
+	if (keepGoing != 0) {
+		return;
+	}
+
+	printf("#> ");
+
+	while (fgets(input, 4096, stdin) != NULL) {
+		opt1[0] = '\0';
+		input[strlen(input)-1] = '\0';
+		if (input[0] != '\0') {
+			strncpy(savedInput, input, 4096);
+		}
+		if ((input[0] == '\0') &&
+			(savedInput[0] != '\0')) {
+			strncpy(input, savedInput, 4096);
+		}
+		if (input[0] == 's' || input[0] == 'n') {
+			break;
+		}
+		if (input[0] == 'c') {
+			keepGoing = 1;
+			break;
+		}
+		if (input[0] == 'm') {
+			sscanf(input, "%s %s", cmd, opt1);
+			num = 16;
+			if (opt1[0] != '\0') {
+				num = strtoull(opt1, NULL, 0);
+			}
+			dumpMemory((int)num);
+		}
+		if (input[0] == 'r') {
+			dumpRegisters(0, cpu.nextPC, cpu.msg);
+		}
+		if (input[0] == 'f') {
+			addBreakpoint("fin", 0, 1);
+			keepGoing = 1;
+			break;
+		}
+		if (input[0] == 'b') {
+			sscanf(input, "%s %s %s", cmd, opt1, opt2);
+			if (opt1[0] != '\0') {
+				num = strtoull(opt2, NULL, 0);
+				addBreakpoint(opt1, num, UINT64_MAX);
+			} else {
+				listBreakpoints();
+			}
+		}
+		if (input[0] == 'd') {
+			sscanf(input, "%s %s", cmd, opt1);
+			if (opt1[0] != '\0') {
+				num = strtoull(opt1, NULL, 0);
+				deleteBreakpoint(num);
+			} else {
+				deleteAllBreakpoints();
+			}
+		}
+		if (input[0] == 'q') {
+			break;
+		}
+		if (input[0] == 'h') {
+			printf("s - step forward one instruction\n");
+			printf("c - continue until breakpoint or end of execution\n");
+			printf("m - print memory contents\n");
+			printf("r - print register contents\n");
+			printf("b - list or add breakpoints\n");
+			printf("d - delete breakpoints\n");
+			printf("f - continue until return from function\n");
+		}
+
+		printf("#> ");
+	}
+}
+#endif
+
+/*
+ * -1 An error occurred.
+ *  0 Keep accepting user commands.
+ *  1 Give control back to the emulator.
+ */
+static int parseCommand(struct cpuState *cpu, char input[4096])
+{
+	char	cmd[4096];
+	char	opt1[4096];
+	char	opt2[4096];
+	uint64_t num;
+	static char	savedInput[4096] = "s";
+
+	opt1[0] = '\0';
+	if (input[strlen(input)-1] == '\n') {
+		input[strlen(input)-1] = '\0';
+	}
+	if (input[0] != '\0') {
+		strncpy(savedInput, input, 4096);
+	}
+	if ((input[0] == '\0') &&
+		(savedInput[0] != '\0')) {
+		strncpy(input, savedInput, 4096);
+	}
+	if (input[0] == 's' || input[0] == 'n') {
+		return 1;
+	}
+	if (input[0] == 'c') {
+		keepGoing = 1;
+		return 1;
+	}
+	if (input[0] == 'm') {
+		sscanf(input, "%s %s", cmd, opt1);
+		num = 16;
+		if (opt1[0] != '\0') {
+			num = strtoull(opt1, NULL, 0);
+		}
+		dumpMemory(cpu, (int)num);
+	}
+	if (input[0] == 'r') {
+		//dumpRegisters(0, cpu->nextPC, cpu->msg);
+	}
+	if (input[0] == 'f') {
+		addBreakpoint("fin", 0, 1);
+		keepGoing = 1;
+		return 1;
+	}
+	if (input[0] == 'b') {
+		sscanf(input, "%s %s %s", cmd, opt1, opt2);
+		if (opt1[0] != '\0') {
+			num = strtoull(opt2, NULL, 0);
+			addBreakpoint(opt1, num, UINT64_MAX);
+		} else {
+			listBreakpoints();
+		}
+	}
+	if (input[0] == 'd') {
+		sscanf(input, "%s %s", cmd, opt1);
+		if (opt1[0] != '\0') {
+			num = strtoull(opt1, NULL, 0);
+			deleteBreakpoint(num);
+		} else {
+			deleteAllBreakpoints();
+		}
+	}
+	if (input[0] == 'q') {
+		return 1;
+	}
+	if (input[0] == 'h') {
+		fprintf(stderr, "Help command: %s\n", input);
+		shellPrint("s - step forward one instruction\n");
+		shellPrint("c - continue until breakpoint or end of execution\n");
+		shellPrint("m - print memory contents\n");
+		shellPrint("r - print register contents\n");
+		shellPrint("b - list or add breakpoints\n");
+		shellPrint("d - delete breakpoints\n");
+		shellPrint("f - continue until return from function\n");
+	}
+
+	return 0;
+}
+
+static int updateShellWindow(Window *shell, struct cpuState *cpu, struct instruction *o)
+{
+	char	input[4096];
+
+	if (hitBreakpoint(cpu, o) != 0) {
+		keepGoing = 0;
+	}
+
+	if (keepGoing != 0) {
+		return 0;
+	}
+
+	while (1) {
+		/*
+		 * Capture the next shell command.
+		 */
+		echo();
+		mvwprintw(shell->wn, shell->h - 1, 1, "#> ");
+		mvwgetstr(shell->wn, shell->h - 1, 4, input);
+		noecho();
+		//wscrl(shell->wn, 1);
+		wrefresh(shell->wn);
+
+		/*
+		 * Execute the command.
+		 */
+		if (parseCommand(cpu, input) != 0) {
+			break;
+		}
+	}
+
+	return 0;
+}
+
+int updateSimple(struct cpuState *cpu, struct instruction *o)
+{
+	char	input[4096];
+
+	if (hitBreakpoint(cpu, o) != 0) {
+		keepGoing = 0;
+	}
+
+	if (keepGoing != 0) {
+		return 0;
+	}
+
+	printf("#> ");
+
+	while (fgets(input, 4096, stdin) != NULL) {
+		if (parseCommand(cpu, input) != 0) {
+			break;
+		}
+		printf("#> ");
+	}
 
 	return 0;
 }
@@ -436,16 +839,15 @@ void freeTUI()
     refresh();
 }
 
-/*
- * TODO: Really... the progOffset is an unsigned 32 bit integer.
- * We happen to know that fits in an "int" on this 64 bit machine.
- * This must change when the code becomes self hosted.
- */
-int updateTUI(struct cpuState *cpu)
+int updateTUI(struct cpuState *cpu, struct instruction *o)
 {
-	updateCodeWindow(code, cpu->pc);
-	updateRegsWindow(regs, cpu);
-	updateShellWindow(shell, cpu);
+	if (simpleTUI != 0) {
+		updateSimple(cpu, o);
+	} else {
+		updateCodeWindow(code, cpu->pc);
+		updateRegsWindow(regs, cpu);
+		updateShellWindow(shell, cpu, o);
+	}
 
 	return 0;
 }
