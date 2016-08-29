@@ -13,6 +13,7 @@
 #include <getopt.h>
 
 #include "isa.h"
+#include "debugger.h"
 
 #define log(...) \
 	do { \
@@ -67,16 +68,17 @@ struct cpuState {
 } cpu;
 
 #define NUM_REGISTERS 16
-uint32_t r[NUM_REGISTERS], pc;
-uint32_t memSize = 32 * 1024 * 1024;
-uint8_t *mem;
-char *memoryFile = "emulator.memory";
+static uint32_t r[NUM_REGISTERS], pc;
+static uint32_t memSize = 32 * 1024 * 1024;
+static uint8_t *mem;
+static char *memoryFile = "emulator.memory";
 
 uint64_t 	ic;
 uint32_t 	nextPC;
 uint32_t	startingPC;
 char		msg[4096];
-int			beInteractive = 0;
+int			beInteractive;
+int			tui;
 uint64_t	maxCycles = UINT64_MAX;
 char		*romFile = NULL;
 
@@ -385,6 +387,10 @@ void dumpRegisters(int printHeader, uint32_t nextPC, char *message)
 {
 	int i;
 
+	if (tui != 0) {
+		return;
+	}
+
 	if (printHeader) {
 		printf("%25s    pc   npc flags ", "");
 		for (i = 0; i < NUM_REGISTERS; i++)
@@ -561,6 +567,11 @@ void interactive()
 		return;
 	}
 
+	if (tui != 0) {
+		updateTUI(pc);
+		return;
+	}
+
 	if (hitBreakpoint() != 0) {
 		keepGoing = 0;
 	}
@@ -644,6 +655,7 @@ static struct option longopts[] = {
 	{"binary", required_argument, NULL, 'b'},
 	{"max-cycles", required_argument, NULL, 'c'},
 	{"interactive", no_argument, NULL, 'i'},
+	{"tui", no_argument, NULL, 't'},
 	{"starting-pc", required_argument, NULL, 'p'},
 	{"help", no_argument, NULL, 'h'}
 };
@@ -653,6 +665,7 @@ char *optdesc[] = {
 	"A binary to place in memory as <binaryPath>:<memoryOffset>.",
 	"Emulator will exit after N cycles.",
 	"Interactive debugging mode.",
+	"Text user interface (TUI).",
 	"Starting program counter value as <memoryOffset>.",
 	"This help."
 };
@@ -708,6 +721,10 @@ void parseArgs(int argc, char **argv)
 				break;
 			case 'i':
 				beInteractive = 1;
+				break;
+			case 't':
+				beInteractive = 1;
+				tui = 1;
 				break;
 			case 'c':
 				maxCycles = strtoull(optarg, NULL, 0);
@@ -901,6 +918,10 @@ int main(int argc, char **argv)
 		}
 	}
 
+	if (tui != 0) {
+		initTUI();
+	}
+
 	ic = 0;
 	pc = startingPC;
 	stop = 0;
@@ -1080,6 +1101,10 @@ int main(int argc, char **argv)
 		}
 	}
 	interactive();
+
+	if (tui != 0) {
+		freeTUI();
+	}
 
 	return(0);
 }

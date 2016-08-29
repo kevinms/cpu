@@ -4,7 +4,10 @@
 *.sym
 *.img
 *.memory
+*.debug
 emulator
 fs
 heap
+core
+debugger
 *.swp
