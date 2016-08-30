@@ -9,8 +9,8 @@ DONE - Decide whether the emulator prints decimal or hex numbers.
 	   number which is decimal. That exception is purely because
 	   registers are referenced in assembly by their decimal number.
 
-Whatever endianess is decided upon, needs to be enforced in the
-emulator, assembler and fs utilities.
+DONE - Whatever endianess is decided upon, needs to be enforced in the
+	   emulator, assembler and fs utilities. (Chose little endian)
 
 DONE - Option for assembler to begin PC at certain value.
        The --base-address option was added to the assembler for this.
@@ -19,16 +19,16 @@ DONE - Assembler should export labels to ABI file so others can
 	   reference it. The --export-symbols option has been added to
 	   and you can specify a symbol file to dump symbols to.
 
-Determine sane offsets/sizes for the memory layout. I.e. placement and
-size of kernel, kernel's stack, mmap I/O region, standard library, etc.
+DONE - Determine sane offsets/sizes for the memory layout. I.e. placement and
+	   size of kernel, kernel's stack, mmap I/O region, standard library, etc.
 
-Figure out how conditional branches and the flags register will work.
+DONE - Figure out how conditional branches and the flags register will work.
 
-Implement malloc and free in the standard library.
+WIP - Implement malloc and free in the standard library.
 
 Implement the FS library and possibly use it in the BIOS.
 
-Kernel should use malloc and free to spawn new tasks.
+WIP - Kernel should use malloc and free to spawn new tasks.
 
 Finish interrupt implementation in the emulator and add a task switcher
 interrupt handler to the kernel.

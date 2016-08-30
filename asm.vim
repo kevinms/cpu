@@ -87,17 +87,17 @@ hi def link decNumber	Number
 hi def link octNumber	Number
 hi def link binNumber	Number
 
-"hi def link asmTodo	Todo
-"hi def link asmType	Conditional
-"hi def link asmComment	Comment
-"hi def link asmLabel	Label
-"hi def link asmIdentifier	Identifier
-"hi def link asmDirective	Identifier
-"hi def link asmIdentifier	Conditional
-"hi def link asmDirective	Conditional
+hi def link asmTodo	Todo
+hi def link asmType	Conditional
+hi def link asmComment	Comment
+hi def link asmLabel	Label
+hi def link asmIdentifier	Identifier
+hi def link asmDirective	Identifier
+hi def link asmIdentifier	Conditional
+hi def link asmDirective	Conditional
 
-"hi def link asmSpecial		Special
-"hi def link asmString		String
+hi def link asmSpecial		Special
+hi def link asmString		String
 
 let b:current_syntax = "asm"
 
