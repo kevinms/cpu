@@ -147,8 +147,8 @@ int loadDebugInfo(char *fileName, uint32_t baseAddr)
 
 	int lineNum, progOffset;
 	i = 0;
-	while ((fscanf(f, "%X %X", &lineNum, &progOffset) == 2) && !feof(f)) {
-		//fprintf(stderr, "0x%X 0x%X\n", lineNum, progOffset);
+	while ((fscanf(f, "%d %X", &lineNum, &progOffset) == 2) && !feof(f)) {
+		//fprintf(stderr, "%d 0x%X\n", lineNum, progOffset);
 		i++;
 	}
 	fseek(f, 0, SEEK_SET);
@@ -160,7 +160,7 @@ int loadDebugInfo(char *fileName, uint32_t baseAddr)
 	info->indexCount = i;
 
 	i = 0;
-	while ((fscanf(f, "%X %X", &lineNum, &progOffset) == 2) && !feof(f)) {
+	while ((fscanf(f, "%d %X", &lineNum, &progOffset) == 2) && !feof(f)) {
 		/*
  		 * Store mapping in a simple array, for now.
  		 * We index lines starting at "0" rather than "1" -- adjust.
@@ -222,8 +222,60 @@ static int shellPrint(const char *fmt, ...)
 	return 0;
 }
 
+DebugInfo *mapLineToOffset(char *file, int lineNum, uint32_t *progOffset)
+{
+	int i;
+	DebugInfo *info;
+
+	/*
+	 * We store the lineNum -> progOffset mapping in an array. That array
+	 * is indexed starting at zero where as line numbers are usually
+	 * indexed starting at one. This seems pretty hacky... but adjust
+	 * the lineNum by 1 so that it maps into the array.
+	 */
+	lineNum--;
+
+	/*
+	 * Find the source file that matches.
+	 */
+	for (info = gInfo; info != NULL; info = info->next) {
+		if (strcmp(info->sourceFile, file) == 0) {
+			/*
+			 * Found debug info match.
+			 */
+			break;
+		}
+	}
+	if (info == NULL) {
+		shellPrint("Can't find file %s for line: %d", file, lineNum);
+		return NULL;
+	}
+
+	/*
+	 * Brute force search for program offset based on line number
+	 * using the simple array mapping.
+	 */
+	for (i = 0; i < info->indexCount; i++) {
+		if (info->indexLine[i] == lineNum) {
+			/*
+			 * Found match.
+			 */
+			*progOffset = info->indexOffset[i] + info->baseAddr;
+			break;
+		}
+	}
+	if (i >= info->indexCount) {
+		shellPrint("Can't map line (%d) to offset for %s\n", lineNum, file);
+		return NULL;
+	}
+
+	shellPrint("Mapped line (%d) to offset (0x%X)for %s\n", lineNum, *progOffset, file);
+
+	return info;
+}
+
 #define BP_PC 0
-#define BP_IC 1
+#define BP_LINE 1
 #define BP_MEM_RD 2
 #define BP_MEM_WR 3
 #define BP_MEM_RDWR 4
@@ -231,9 +283,18 @@ static int shellPrint(const char *fmt, ...)
 
 struct breakpoint {
 	int type;
-	uint64_t condition;
+	uint32_t condition; // Does this need to be 64 bit?
 	uint64_t maxHits;
 	uint64_t id;
+
+	/*
+	 * Generic storage for breakpoint type agnostic arguments.
+	 */
+	char opt1[512];
+	char opt2[512];
+	uint32_t num1;
+	uint32_t num2;
+
 	struct breakpoint *next;
 };
 
@@ -246,7 +307,7 @@ static struct breakpoint *bp_list;
 static uint64_t bp_list_count;
 static struct bptype bp_table[] = {
 	{BP_PC, "pc"},
-	{BP_IC, "ic"},
+	{BP_LINE, "line"},
 	{BP_MEM_RD, "rd"},
 	{BP_MEM_WR, "wr"},
 	{BP_MEM_RDWR, "rdwr"},
@@ -319,13 +380,18 @@ void deleteAllBreakpoints()
 	}
 }
 
-uint64_t addBreakpoint(char *name, uint64_t condition, uint64_t maxHits)
+uint64_t addBreakpoint(char *args)
 {
 	struct breakpoint *bp;
 	int type = -1;
 	int i;
+	char name[512];
 
-	for(i = 0; i < sizeof(bp_table); ++i) {
+	/*
+	 * What type of breakpoint is  this?
+	 */
+	sscanf(args, "%s", name);
+	for (i = 0; i < sizeof(bp_table) / sizeof(*bp_table); ++i) {
 		if (strcmp(bp_table[i].name, name) == 0) {
 			type = bp_table[i].type;
 			break;
@@ -333,21 +399,63 @@ uint64_t addBreakpoint(char *name, uint64_t condition, uint64_t maxHits)
 	}
 	if (type < 0) {
 		shellPrint("Unknown breakpoint type: %d\n", type);
-		return(UINT64_MAX);
+		return UINT64_MAX;
 	}
+	args += strlen(name);
 
 	bp = malloc(sizeof(*bp));
-
+	memset(bp, 0, sizeof(*bp));
 	bp->type = type;
-	bp->condition = condition;
-	bp->maxHits = maxHits;
-	bp->id = bp_list_count;
+	bp->maxHits = UINT64_MAX;
+	bp->condition = 0;
 
+	/*
+	 * Parse arguments.
+	 */
+	switch (type) {
+		case BP_LINE:
+			if (sscanf(args, "%s %d", bp->opt1, &bp->num1) != 2) {
+				shellPrint("Line break format: <file> <line>\n");
+				free(bp);
+				return UINT64_MAX;
+			}
+			shellPrint("Setting breakpoint for %s:%d\n", bp->opt1, bp->num1);
+			if (mapLineToOffset(bp->opt1, (int)bp->num1, &bp->condition) == NULL) {
+				return UINT64_MAX;
+			}
+			break;
+		case BP_PC:
+			/*
+			 * Use strtoull() so that it can interpret base for us.
+			 */
+			errno = 0;
+			bp->condition = strtoull(args, NULL, 0);
+			if (errno != 0) {
+				shellPrint("Can't parse PC value: %s\n", strerror(errno));
+				shellPrint("PC break format: <PC value>\n");
+				free(bp);
+				return UINT64_MAX;
+			}
+			break;
+		case BP_MEM_RD:
+		case BP_MEM_WR:
+		case BP_MEM_RDWR:
+		case BP_FINISH:
+			break;
+		default:
+			shellPrint("How on earth did we get here?!\n");
+			return UINT64_MAX;
+	}
+
+	/*
+	 * Add to the global breakpoint list.
+	 */
+	bp->id = bp_list_count;
 	bp_list_count++;
 	bp->next = bp_list;
 	bp_list = bp;
 
-	shellPrint("Set breakpoint: %s %" PRIX64 "\n", name, condition);
+	shellPrint("Set breakpoint: %s 0x%" PRIX32 "\n", name, bp->condition);
 
 	return(bp->id);
 }
@@ -360,19 +468,25 @@ int hitBreakpoint(struct cpuState *cpu, struct instruction *o)
 
 	for (bp = bp_list, i = 0; bp != NULL; bp = bp->next, ++i) {
 		switch (bp->type) {
-		case BP_PC:
-			if (cpu->pc == (uint32_t)bp->condition) {
-				shellPrint("Hit breakpoint #%" PRIX64 ": PC == 0x%" PRIX32 "\n", i, cpu->pc);
-				hitBP = bp;
-			}
-			break;
-		case BP_FINISH: {
-			if ((o->op == jmp) && ((o->mode & MODE_OPERAND) == OPR_REG) && (o->raw2 == 4)) {
-				shellPrint("Hit breakpoint #%" PRIX64 ": jmp r4\n", i);
-				hitBP = bp;
-			}
-			break;
-		}
+			case BP_PC:
+				if (cpu->pc == bp->condition) {
+					shellPrint("Hit breakpoint #%" PRIX64 ": PC == 0x%" PRIX32 "\n", i, cpu->pc);
+					hitBP = bp;
+				}
+				break;
+			case BP_FINISH:
+				if ((o->op == jmp) && ((o->mode & MODE_OPERAND) == OPR_REG) && (o->raw2 == 4)) {
+					shellPrint("Hit breakpoint #%" PRIX64 ": jmp r4\n", i);
+					hitBP = bp;
+				}
+				break;
+			case BP_LINE:
+				if (cpu->pc == bp->condition) {
+					shellPrint("Hit breakpoint #%" PRIX64 ": line(%s:%d) or progOffset(0x%" PRIX64 ")\n",
+					           i, bp->opt1, bp->num1, bp->condition);
+					hitBP = bp;
+				}
+				break;
 		}
 	}
 
@@ -393,7 +507,15 @@ void listBreakpoints()
 
 	shellPrint("Breakpoints:\n");
 	for (bp = bp_list, i = 0; bp != NULL; bp = bp->next, ++i) {
-		shellPrint(" #%" PRIX64 " %s == %" PRIX64 "\n", i, bp_table[bp->type].name, bp->condition);
+		switch (bp->type) {
+			case BP_LINE:
+				shellPrint(" #%" PRIX64 " line(%s:%d) or progOffset(0x%" PRIX64 ")\n",
+						   i, bp->opt1, bp->num1, bp->condition);
+				break;
+			default:
+				shellPrint(" #%" PRIX64 " %s == %" PRIX64 "\n", i, bp_table[bp->type].name, bp->condition);
+				break;
+		}
 	}
 }
 
@@ -488,13 +610,6 @@ static int updateCodeWindow(Window *code, int progOffset)
 		}
 	}
 
-	//TODO: do we want a box?
-#if 0
-	wattron(code->wn, COLOR_PAIR(2));
-	box(code->wn, 0, 0);
-	wattroff(code->wn, COLOR_PAIR(2));
-#endif
-
     wrefresh(code->wn);
 	
 	return 0;
@@ -506,10 +621,21 @@ static int updateRegsWindow(Window *regs, struct cpuState *cpu)
 	 * Print value of each register.
 	 */
 	int i;
+	char buf[256];
 	int maxRegStr = strlen("r15: -0x0000000000");
+
+	/*
+	 * Explicitly print PC register.
+	 */
+	sprintf(buf, "PC: 0x%" PRIX32, cpu->pc);
+	sprintf(buf+strlen(buf), "%*s", (int)maxRegStr - (int)strlen(buf), " ");
+    mvwaddstr(regs->wn, 2, 1, buf);
+
+	/*
+	 * Print the rest.
+	 */
 	for (i = 0; i < 16; i++) {
 		int col = i >= 8 ? 1 : 0;
-		char buf[256];
 		sprintf(buf, "r%d: 0x%" PRIX32, i, cpu->r[i]);
 		sprintf(buf+strlen(buf), "%*s", (int)maxRegStr - (int)strlen(buf), " ");
     	mvwaddstr(regs->wn, 3 + (i % 8), 1 + col * maxRegStr, buf);
@@ -529,7 +655,6 @@ static int parseCommand(struct cpuState *cpu, char input[4096])
 {
 	char	cmd[4096];
 	char	opt1[4096];
-	char	opt2[4096];
 	uint64_t num;
 	static char	savedInput[4096] = "s";
 
@@ -557,21 +682,25 @@ static int parseCommand(struct cpuState *cpu, char input[4096])
 		if (opt1[0] != '\0') {
 			num = strtoull(opt1, NULL, 0);
 		}
-		dumpMemory(cpu, (int)num);
+		if (simpleTUI != 0) {
+			//TODO: Support dumping memory to the shell window.
+			dumpMemory(cpu, (int)num);
+		}
 	}
 	if (input[0] == 'r') {
-		//dumpRegisters(0, cpu->nextPC, cpu->msg);
+		if (simpleTUI != 0) {
+			//TODO: Should dumpRegisters() be moved to the debugger?
+			//dumpRegisters(0, cpu->nextPC, cpu->msg);
+		}
 	}
 	if (input[0] == 'f') {
-		addBreakpoint("fin", 0, 1);
+		addBreakpoint("fin");
 		keepGoing = 1;
 		return 1;
 	}
 	if (input[0] == 'b') {
-		sscanf(input, "%s %s %s", cmd, opt1, opt2);
-		if (opt1[0] != '\0') {
-			num = strtoull(opt2, NULL, 0);
-			addBreakpoint(opt1, num, UINT64_MAX);
+		if (strlen(input) >= 3) {
+			addBreakpoint(input+2);
 		} else {
 			listBreakpoints();
 		}
