@@ -211,12 +211,13 @@ static int shellPrint(const char *fmt, ...)
 
 	va_list argPtr;
 	va_start(argPtr, fmt);
-	vw_printw(shell->wn, fmt, argPtr);
-	fprintf(stderr, fmt, argPtr);
+	if (simpleTUI != 0) {
+		fprintf(stderr, fmt, argPtr);
+	} else {
+		vw_printw(shell->wn, fmt, argPtr);
+		wrefresh(shell->wn);
+	}
 	va_end(argPtr);
-
-	//wscrl(shell->wn, 1);
-	wrefresh(shell->wn);
 
 	return 0;
 }
@@ -411,8 +412,7 @@ static int updateCodeWindow(Window *code, int progOffset)
 		}
 	}
 	if (info == NULL) {
-		mvwprintw(shell->wn, 2, 2, "Can't find source file for progOffset:"
-		          " 0x%X", progOffset);
+		shellPrint("Can't find source file for progOffset: 0x%X", progOffset);
 		return 0;
 	}
 
@@ -430,8 +430,7 @@ static int updateCodeWindow(Window *code, int progOffset)
 		}
 	}
 	if (i >= info->indexCount) {
-		mvwprintw(shell->wn, 2, 2, "Can't find offset (0x%X) -> line"
-		          " mapping.\n", progOffset);
+		shellPrint("Can't map offset (0x%X) to line for %s\n", progOffset, info->sourceFile);
 		return 0;
 	}
 
@@ -521,96 +520,6 @@ static int updateRegsWindow(Window *regs, struct cpuState *cpu)
 	return 0;
 }
 
-#if 0
-void interactive()
-{
-	char	input[4096];
-	char	cmd[4096];
-	char	opt1[4096];
-	char	opt2[4096];
-	static char	savedInput[4096] = "s";
-	uint64_t num;
-	static int keepGoing;
-
-	if (hitBreakpoint() != 0) {
-		keepGoing = 0;
-	}
-
-	if (keepGoing != 0) {
-		return;
-	}
-
-	printf("#> ");
-
-	while (fgets(input, 4096, stdin) != NULL) {
-		opt1[0] = '\0';
-		input[strlen(input)-1] = '\0';
-		if (input[0] != '\0') {
-			strncpy(savedInput, input, 4096);
-		}
-		if ((input[0] == '\0') &&
-			(savedInput[0] != '\0')) {
-			strncpy(input, savedInput, 4096);
-		}
-		if (input[0] == 's' || input[0] == 'n') {
-			break;
-		}
-		if (input[0] == 'c') {
-			keepGoing = 1;
-			break;
-		}
-		if (input[0] == 'm') {
-			sscanf(input, "%s %s", cmd, opt1);
-			num = 16;
-			if (opt1[0] != '\0') {
-				num = strtoull(opt1, NULL, 0);
-			}
-			dumpMemory((int)num);
-		}
-		if (input[0] == 'r') {
-			dumpRegisters(0, cpu.nextPC, cpu.msg);
-		}
-		if (input[0] == 'f') {
-			addBreakpoint("fin", 0, 1);
-			keepGoing = 1;
-			break;
-		}
-		if (input[0] == 'b') {
-			sscanf(input, "%s %s %s", cmd, opt1, opt2);
-			if (opt1[0] != '\0') {
-				num = strtoull(opt2, NULL, 0);
-				addBreakpoint(opt1, num, UINT64_MAX);
-			} else {
-				listBreakpoints();
-			}
-		}
-		if (input[0] == 'd') {
-			sscanf(input, "%s %s", cmd, opt1);
-			if (opt1[0] != '\0') {
-				num = strtoull(opt1, NULL, 0);
-				deleteBreakpoint(num);
-			} else {
-				deleteAllBreakpoints();
-			}
-		}
-		if (input[0] == 'q') {
-			break;
-		}
-		if (input[0] == 'h') {
-			printf("s - step forward one instruction\n");
-			printf("c - continue until breakpoint or end of execution\n");
-			printf("m - print memory contents\n");
-			printf("r - print register contents\n");
-			printf("b - list or add breakpoints\n");
-			printf("d - delete breakpoints\n");
-			printf("f - continue until return from function\n");
-		}
-
-		printf("#> ");
-	}
-}
-#endif
-
 /*
  * -1 An error occurred.
  *  0 Keep accepting user commands.
@@ -680,7 +589,6 @@ static int parseCommand(struct cpuState *cpu, char input[4096])
 		return 1;
 	}
 	if (input[0] == 'h') {
-		fprintf(stderr, "Help command: %s\n", input);
 		shellPrint("s - step forward one instruction\n");
 		shellPrint("c - continue until breakpoint or end of execution\n");
 		shellPrint("m - print memory contents\n");
@@ -713,7 +621,6 @@ static int updateShellWindow(Window *shell, struct cpuState *cpu, struct instruc
 		mvwprintw(shell->wn, shell->h - 1, 1, "#> ");
 		mvwgetstr(shell->wn, shell->h - 1, 4, input);
 		noecho();
-		//wscrl(shell->wn, 1);
 		wrefresh(shell->wn);
 
 		/*
@@ -753,6 +660,10 @@ int updateSimple(struct cpuState *cpu, struct instruction *o)
 
 int initTUI()
 {
+	if (simpleTUI != 0) {
+		return 0;
+	}
+
     if ((top.wn = initscr()) == NULL) {
 		fprintf(stderr, "Error initialising ncurses.\n");
 		exit(1);
@@ -821,7 +732,10 @@ int initTUI()
 
 void freeTUI()
 {
-    /*  Clean up after ourselves  */
+	if (simpleTUI != 0) {
+		return;
+	}
+
 	if (code != NULL) {
     	delwin(code->wn);
 	}

@@ -44,7 +44,7 @@ def exportSymbol(label):
 
 def exportDebug(lineNum, progOffset):
 	if debugFile is not None:
-		debugFile.write("0x%X 0x%X\n" % (lineNum, progOffset))
+		debugFile.write("0x%X 0x%X\n" % (lineNum, progOffset - baseAddress))
 
 def parseISA():
 	parse = 0
