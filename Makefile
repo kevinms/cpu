@@ -22,5 +22,8 @@ kernel:
 	cat progs/lib.sym progs/kernel.asm > progs/all.kernel.asm
 	./assembler.py -a progs/all.kernel.asm --binary --debug > progs/kernel.rom
 
+sane:
+	stty sane^J
+
 clean:
 	rm -f emulator fs heap

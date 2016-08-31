@@ -44,31 +44,32 @@ static struct cpuState cpu;
 	 (((x) & 0xFF0000) >> 8) | \
 	 (((x) & 0xFF000000) >> 24))
 
-uint16_t littleToHost16(uint16_t x)
+__attribute__((unused))
+static uint16_t littleToHost16(uint16_t x)
 {
 	x = byteSwap16(x);
 	return ntohs(x);
 }
 
-uint16_t hostToLittle16(uint16_t x)
+static uint16_t hostToLittle16(uint16_t x)
 {
 	x = htons(x);
 	return byteSwap16(x);
 }
 
-uint32_t littleToHost32(uint32_t x)
+static uint32_t littleToHost32(uint32_t x)
 {
 	x = byteSwap32(x);
 	return ntohl(x);
 }
 
-uint32_t hostToLittle32(uint32_t x)
+static uint32_t hostToLittle32(uint32_t x)
 {
 	x = htonl(x);
 	return byteSwap32(x);
 }
 
-int openMemoryFile()
+static int openMemoryFile()
 {
 	int fd;
 	int openFlags;
@@ -114,27 +115,7 @@ int openMemoryFile()
 	return(0);
 }
 
-int initEnvironment()
-{
-	cpu.pc = 0;
-	cpu.mmapIOstart = 0;
-	cpu.mmapIOend = 0; //0x9C
-	cpu.maxCycles = UINT64_MAX;
-	cpu.memSize = 32 * 1024 * 1024;
-	cpu.memoryFile = strdup("emulator.memory");
-
-	if (openMemoryFile() < 0) {
-		return -1;
-	}
-	memset(cpu.mem, 0, cpu.memSize);
-
-	memset(cpu.r, 0, sizeof(cpu.r));
-	cpu.flags = (struct flags *)(cpu.r + 13);
-
-	return 0;
-}
-
-int addBinary(char *binaryInfo, int debugOnly)
+static int addBinary(char *binaryInfo, int debugOnly)
 {
 	struct binary *newBinary;
 	char *separator, *path, *offset;
@@ -162,7 +143,7 @@ int addBinary(char *binaryInfo, int debugOnly)
 	return 0;
 }
 
-int loadBinary(struct binary *binary)
+static int loadBinary(struct binary *binary)
 {
 	int		fd;
 	struct stat	statBuffer;
@@ -203,26 +184,27 @@ int loadBinary(struct binary *binary)
 		bytesLeft -= (uint32_t)bytesRead;
 		buffer += bytesRead;
 	}
+	close(fd);
 
 	return 0;
 }
 
-void parse8bit(char *bits, uint8_t *memory)
+static void parse8bit(char *bits, uint8_t *memory)
 {
 	*(uint8_t *)memory = (uint8_t)strtoul(bits, NULL, 2);
 }
 
-void parse16bit(char *bits, uint8_t *memory)
+static void parse16bit(char *bits, uint8_t *memory)
 {
 	*(uint32_t *)memory = hostToLittle16((uint32_t)strtoul(bits, NULL, 2));
 }
 
-void parse32bit(char *bits, uint8_t *memory)
+static void parse32bit(char *bits, uint8_t *memory)
 {
 	*(uint32_t *)memory = hostToLittle32((uint32_t)strtoul(bits, NULL, 2));
 }
 
-int loadROM(char *path)
+static int loadROM(char *path)
 {
 	FILE	*fd;
 	char	buf[512];
@@ -261,7 +243,80 @@ int loadROM(char *path)
 	return(returnValue);
 }
 
-uint32_t
+static void freeEnvironment()
+{
+	if (cpu.mem != NULL) {
+		if (munmap(cpu.mem, cpu.memSize) != 0) {
+			fprintf(stderr, "Can't munmap memory: %s\n", strerror(errno));
+		}
+	}
+
+	free(romFile);
+	romFile = NULL;
+
+	while (gBinaryList != NULL) {
+		struct binary *thisBinary = gBinaryList;
+		gBinaryList = gBinaryList->next;
+		free(thisBinary->filePath);
+		free(thisBinary);
+	}
+
+	if (tui != 0) {
+		freeTUI();
+	}
+}
+
+static int initEnvironment()
+{
+	cpu.pc = 0;
+	cpu.mmapIOstart = 0;
+	cpu.mmapIOend = 0; //0x9C
+	cpu.maxCycles = UINT64_MAX;
+	cpu.memSize = 32 * 1024 * 1024;
+	cpu.memoryFile = "emulator.memory";
+
+	if (openMemoryFile() < 0) {
+		return -1;
+	}
+	memset(cpu.mem, 0, cpu.memSize);
+
+	memset(cpu.r, 0, sizeof(cpu.r));
+	cpu.flags = (struct flags *)(cpu.r + 13);
+
+	/*
+	 * Load .rom file into memory.
+	 */
+	if ((romFile != NULL) &&
+		(loadROM(romFile) < 0)) {
+		return(1);
+	}
+
+	/*
+	 * Load .bin files into memory.
+	 */
+	if (gBinaryList != NULL) {
+		struct binary *thisBinary;
+
+		for (thisBinary = gBinaryList;
+			 thisBinary != NULL;
+			 thisBinary = thisBinary->next) {
+			if (loadBinary(thisBinary) < 0) {
+				return(1);
+			}
+			if (tui != 0) {
+				loadDebugInfo(thisBinary->filePath, thisBinary->memoryOffset);
+			}
+		}
+	}
+
+	if (tui != 0) {
+		initTUI();
+	}
+
+	return 0;
+}
+
+static uint32_t
 fetchInst(uint32_t lpc, struct instruction *o)
 {
 	uint8_t *i = cpu.mem + lpc;
@@ -290,7 +345,7 @@ fetchInst(uint32_t lpc, struct instruction *o)
 	return(lpc + 8);
 } 
 
-void interactive()
+static void interactive()
 {
 	struct instruction o;
 
@@ -300,27 +355,26 @@ void interactive()
 
 	fetchInst(cpu.pc, &o);
 
-	if (tui != 0) {
-		updateTUI(&cpu, &o);
-		return;
-	}
+	updateTUI(&cpu, &o);
 }
 
+#if 0
 struct SPI {
 	uint8_t tx, rx;
 };
 
-int SPIsend(uint8_t data)
+static int SPIsend(uint8_t data)
 {
 	return(0);
 }
 
-uint8_t SPIrecv()
+static uint8_t SPIrecv()
 {
 	return(0);
 }
+#endif
 
-uint32_t getAddress(uint8_t mode, uint32_t offset)
+static uint32_t getAddress(uint8_t mode, uint32_t offset)
 {
 	if ((mode & MODE_ADDRESS) == ADDR_REL) {
 		/*
@@ -335,7 +389,7 @@ uint32_t getAddress(uint8_t mode, uint32_t offset)
 	}
 }
 
-uint32_t *mmapIOregister(uint32_t address)
+static  uint32_t *mmapIOregister(uint32_t address)
 {
 	if (address >= 0x0 && address < 0x4) {
 		/*
@@ -391,12 +445,12 @@ uint32_t *mmapIOregister(uint32_t address)
 	return(NULL);
 }
 
-uint8_t read8bit(uint32_t address)
+static uint8_t read8bit(uint32_t address)
 {
 	return cpu.mem[address];
 }
 
-uint32_t read32bit(uint32_t address)
+static uint32_t read32bit(uint32_t address)
 {
 	if (address < cpu.mmapIOstart || address >= cpu.mmapIOend) {
 		/*
@@ -420,12 +474,12 @@ uint32_t read32bit(uint32_t address)
 	return(*reg);
 }
 
-void write8bit(uint32_t address, uint8_t data)
+static void write8bit(uint32_t address, uint8_t data)
 {
 	cpu.mem[address] = data;
 }
 
-void write32bit(uint32_t address, uint32_t data)
+static void write32bit(uint32_t address, uint32_t data)
 {
 	if (address < cpu.mmapIOstart || address >= cpu.mmapIOend) {
 		/*
@@ -461,7 +515,7 @@ static struct option longopts[] = {
 	{"help", no_argument, NULL, 'h'}
 };
 
-char *optdesc[] = {
+static char *optdesc[] = {
 	"The ROM to load into memory.",
 	"A binary to place in memory as <binaryPath>:<memoryOffset>.",
 	"Emulator will exit after N cycles.",
@@ -471,9 +525,9 @@ char *optdesc[] = {
 	"This help."
 };
 
-char *optstring = NULL;
+static char *optstring = NULL;
 
-void usage(int argc, char **argv)
+static void usage(int argc, char **argv)
 {
 	int i;
 	int numOptions;
@@ -494,7 +548,7 @@ void usage(int argc, char **argv)
 	printf("\n");
 }
 
-void parseArgs(int argc, char **argv)
+static void parseArgs(int argc, char **argv)
 {
 	int c, i;
 	int longindex;
@@ -550,6 +604,8 @@ void parseArgs(int argc, char **argv)
 		fprintf(stderr, "Expected a ROM or binary file path.\n");
 		exit(1);
 	}
+
+	free(optstring);
 }
 
 int main(int argc, char **argv)
@@ -561,29 +617,6 @@ int main(int argc, char **argv)
 	parseArgs(argc, argv);
 
 	initEnvironment();
-	if ((romFile != NULL) &&
-		(loadROM(romFile) < 0)) {
-		return(1);
-	}
-
-	if (gBinaryList != NULL) {
-		struct binary *thisBinary;
-
-		for (thisBinary = gBinaryList;
-			 thisBinary != NULL;
-			 thisBinary = thisBinary->next) {
-			if (loadBinary(thisBinary) < 0) {
-				return(1);
-			}
-			if (tui != 0) {
-				loadDebugInfo(thisBinary->filePath, thisBinary->memoryOffset);
-			}
-		}
-	}
-
-	if (tui != 0) {
-		initTUI();
-	}
 
 	cpu.pc = cpu.startingPC;
 	stop = 0;
@@ -764,9 +797,7 @@ int main(int argc, char **argv)
 	}
 	interactive();
 
-	if (tui != 0) {
-		freeTUI();
-	}
+	freeEnvironment();
 
 	return(0);
 }

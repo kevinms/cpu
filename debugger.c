@@ -48,7 +48,7 @@ static Window *shell;
 
 static DebugInfo *gInfo;
 static int keepGoing;
-static int simpleTUI = 0;
+static int simpleTUI = 1;
 
 #define BP_PC 0
 #define BP_LINE 1
@@ -149,6 +149,31 @@ DebugInfo *mapLineToOffset(char *file, int lineNum, uint32_t *progOffset)
 	shellPrint("Mapped line (%d) to offset (0x%X)for %s\n", lineNum, *progOffset, file);
 
 	return info;
+}
+
+void freeDebugInfo(DebugInfo *info)
+{
+	if (info == NULL) {
+		return;
+	}
+
+	free(info->sourceFile);
+	free(info->debugFile);
+	free(info->binaryFile);
+
+	int i;
+	for (i = 0; i < info->lineCount; i++) {
+		free(info->text[i]);
+	}
+	free(info->text);
+
+	/*
+	 * We allocate a single buffer and split it between indexLine
+	 * and indexOffset.
+	 */
+	free(info->indexLine);
+
+	free(info);
 }
 
 int loadDebugInfo(char *fileName, uint32_t baseAddr)
@@ -508,6 +533,21 @@ void listBreakpoints()
 	}
 }
 
+void freeWindow(Window *w)
+{
+	if (w == NULL) {
+		return;
+	}
+
+	if (w->title != NULL) {
+		free(w->title);
+	}
+	if (w->wn != NULL) {
+    	delwin(w->wn);
+	}
+	free(w);
+}
+
 static Window *createWindow(Window *p, int h, int w, int y, int x, char *title)
 {
 	Window *win;
@@ -516,6 +556,7 @@ static Window *createWindow(Window *p, int h, int w, int y, int x, char *title)
 		fprintf(stderr, "Can't allocate window struct.\n");
 		abort();
 	}
+	memset(win, 0, sizeof(*win));
 
 	win->w = w;
 	win->h = h;
@@ -830,7 +871,6 @@ int initTUI()
 		fprintf(stderr, "Your terminal does not support changing color\n");
 	}
 	start_color();
-	init_color(COLOR_BLACK, 0, 0, 0);
 	init_pair(1, COLOR_YELLOW, COLOR_BLACK);
 	init_pair(2, COLOR_BLACK, COLOR_WHITE);
 	init_pair(3, COLOR_BLUE, COLOR_BLACK);
@@ -887,18 +927,19 @@ void freeTUI()
 		return;
 	}
 
-	if (code != NULL) {
-    	delwin(code->wn);
+	freeWindow(code);
+	freeWindow(mem);
+	freeWindow(regs);
+	freeWindow(shell);
+
+	deleteAllBreakpoints();
+
+	while (gInfo != NULL) {
+		DebugInfo *info = gInfo;
+		gInfo = info->next;
+		freeDebugInfo(info);
 	}
-	if (mem != NULL) {
-    	delwin(mem->wn);
-	}
-	if (regs != NULL) {
-    	delwin(regs->wn);
-	}
-	if (shell != NULL) {
-    	delwin(shell->wn);
-	}
+
     delwin(top.wn);
     endwin();
     refresh();
