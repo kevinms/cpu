@@ -7,6 +7,12 @@
 #######################################################################
 # Instructions
 
+Integer Arithmetic: add sub adc sbc mul div cmp
+Load / Store:       ldw ldb stw stb
+Move:               mov
+Bitwise Arithmetic: and or xor nor lsl lsr
+Branches:           jmp jz jnz jl jg
+Halt:               die
 
 #######################################################################
 # Labels
@@ -43,3 +49,9 @@ label a lookup table and then reference an offset into it:
 
 	w <number>
 	b <number>
+
+#######################################################################
+# Addressing Modes
+
+Data addresing: direct register or immediate
+Instruction addressing: absolute and base plus offset
