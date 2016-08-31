@@ -48,7 +48,7 @@ static Window *shell;
 
 static DebugInfo *gInfo;
 static int keepGoing;
-static int simpleTUI = 1;
+static int simpleTUI = 0;
 
 #define BP_PC 0
 #define BP_LINE 1
