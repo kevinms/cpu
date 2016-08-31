@@ -3,13 +3,6 @@
 
 #include <inttypes.h>
 
-struct flags {
-	uint32_t n : 1, // negative
-	         z : 1, // zero
-	         o : 1, // overflow
-	         c : 1; // carry
-};
-
 /*
  * Registers:
  *
@@ -20,12 +13,11 @@ struct flags {
  *        r14  c1  Timer 1 Counter
  *        r15  c2  Timer 2 Counter
  */
-#define R_SP cpu.r[11]
-#define R_BA cpu.r[12]
-#define R_FL cpu.r[13]
-#define R_C1 cpu.r[14]
-#define R_C2 cpu.r[15]
-#define flags (*((struct flags *)(cpu.r+13)))
+#define R_SP 11
+#define R_BA 12
+#define R_FL 13
+#define R_C1 14
+#define R_C2 15
 
 #define NUM_REGISTERS 16
 
@@ -34,8 +26,7 @@ struct cpuState {
 	 * Memory Mapped I/O:
 	 */
 	uint32_t mmapIOstart;
-	uint32_t mmapIOend;
-
+	uint32_t mmapIOend; 
 	/*
 	 * Interrupts.
 	 */
@@ -59,6 +50,16 @@ struct cpuState {
 	uint32_t	memSize;
 	uint8_t		*mem;
 	char		*memoryFile;
+
+	/*
+	 * Helper for flags register.
+	 */
+	struct flags {
+		uint32_t n : 1, // negative
+				 z : 1, // zero
+				 o : 1, // overflow
+				 c : 1; // carry
+	} *flags;
 
 	uint64_t 	ic;
 	uint32_t 	nextPC;

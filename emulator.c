@@ -131,6 +131,7 @@ int initEnvironment()
 	memset(cpu.mem, 0, cpu.memSize);
 
 	memset(cpu.r, 0, sizeof(cpu.r));
+	cpu.flags = (struct flags *)(cpu.r + 13);
 
 	return 0;
 }
@@ -291,36 +292,6 @@ fetchInst(uint32_t lpc, struct instruction *o)
 	return(lpc + 8);
 } 
 
-void dumpRegisters(int printHeader, uint32_t nextPC, char *message)
-{
-	int i;
-
-	if (tui != 0) {
-		return;
-	}
-
-	if (printHeader) {
-		printf("%25s    pc   npc flags ", "");
-		for (i = 0; i < NUM_REGISTERS; i++)
-			if (i < 10) {
-				printf("   r%d ", i);
-			} else {
-				printf("  r%d ", i);
-			}
-		printf("\n");
-	}
-
-	printf("%-25s", message == NULL ? "" : message);
-
-	printf(" %5" PRIX32 " %5" PRIX32 " ", cpu.pc, cpu.nextPC);
-	printf("%c%c%c%c  ",
-	       R_FL & FL_N ? 'n' : ' ', R_FL & FL_Z ? 'z' : ' ',
-	       R_FL & FL_V ? 'v' : ' ', R_FL & FL_C ? 'c' : ' ');
-	for(i = 0; i < NUM_REGISTERS; i++)
-		printf("%5" PRIX32 " ", cpu.r[i]);
-	printf("\n");
-}
-
 void interactive()
 {
 	struct instruction o;
@@ -334,108 +305,6 @@ void interactive()
 	if (tui != 0) {
 		updateTUI(&cpu, &o);
 		return;
-	}
-}
-
-static struct option longopts[] = {
-	{"rom", required_argument, NULL, 'r'},
-	{"binary", required_argument, NULL, 'b'},
-	{"debug", required_argument, NULL, 'g'},
-	{"max-cycles", required_argument, NULL, 'c'},
-	{"interactive", no_argument, NULL, 'i'},
-	{"tui", no_argument, NULL, 't'},
-	{"starting-pc", required_argument, NULL, 'p'},
-	{"help", no_argument, NULL, 'h'}
-};
-
-char *optdesc[] = {
-	"The ROM to load into memory.",
-	"A binary to place in memory as <binaryPath>:<memoryOffset>.",
-	"Emulator will exit after N cycles.",
-	"Interactive debugging mode.",
-	"Text user interface (TUI).",
-	"Starting program counter value as <memoryOffset>.",
-	"This help."
-};
-
-char *optstring = NULL;
-
-void usage(int argc, char **argv)
-{
-	int i;
-	int numOptions;
-	int longest;
-
-	printf("%s [OPTION...]\n\n", argv[0]);
-
-	numOptions = sizeof(longopts) / sizeof(*longopts);
-	longest = 0;
-	for (i = 0; i < numOptions; ++i) {
-		if (longest < strlen(longopts[i].name)) {
-			longest = strlen(longopts[i].name);
-		}
-	}
-	for (i = 0; i < numOptions; ++i) {
-		printf("--%-*s, -%c : %s\n", longest, longopts[i].name, longopts[i].val, optdesc[i]);
-	}
-	printf("\n");
-}
-
-void parseArgs(int argc, char **argv)
-{
-	int c, i;
-	int longindex;
-	int numOptions;
-
-	numOptions = sizeof(longopts) / sizeof(*longopts);
-	optstring = malloc(numOptions * 3);
-	memset(optstring, 0, numOptions * 3);
-
-	c = 0;
-	for (i = 0; i < numOptions; ++i) {
-		c += sprintf(optstring+c, "%c%s", (char)longopts[i].val,
-					 longopts[i].has_arg == no_argument ? "" :
-					 longopts[i].has_arg == required_argument ? ":" :
-					 "::");
-	}
-
-	while ((c = getopt_long(argc, argv, optstring, longopts, &longindex)) >= 0) {
-		switch (c) {
-			case 'r':
-				romFile = optarg;
-				break;
-			case 'b':
-				addBinary(optarg, 0);
-				break;
-			case 'g':
-				addBinary(optarg, 1);
-				break;
-			case 'i':
-				beInteractive = 1;
-				break;
-			case 't':
-				beInteractive = 1;
-				tui = 1;
-				break;
-			case 'c':
-				cpu.maxCycles = strtoull(optarg, NULL, 0);
-				break;
-			case 'p':
-				cpu.startingPC = strtoull(optarg, NULL, 0);
-				break;
-			case 'h':
-				usage(argc, argv);
-				break;
-			case '?':
-				break;
-			default:
-				exit(1);
-		}
-	}
-
-	if (romFile == NULL && gBinaryList == NULL) {
-		fprintf(stderr, "Expected a ROM or binary file path.\n");
-		exit(1);
 	}
 }
 
@@ -459,7 +328,7 @@ uint32_t getAddress(uint8_t mode, uint32_t offset)
 		/*
 		 * Relative Address.
 		 */
-		return(R_BA + offset);
+		return(cpu.r[R_BA] + offset);
 	} else {
 		/*
 		 * Absolute Address.
@@ -583,6 +452,108 @@ void write32bit(uint32_t address, uint32_t data)
 	*reg = data;
 }
 
+static struct option longopts[] = {
+	{"rom", required_argument, NULL, 'r'},
+	{"binary", required_argument, NULL, 'b'},
+	{"debug", required_argument, NULL, 'g'},
+	{"max-cycles", required_argument, NULL, 'c'},
+	{"interactive", no_argument, NULL, 'i'},
+	{"tui", no_argument, NULL, 't'},
+	{"starting-pc", required_argument, NULL, 'p'},
+	{"help", no_argument, NULL, 'h'}
+};
+
+char *optdesc[] = {
+	"The ROM to load into memory.",
+	"A binary to place in memory as <binaryPath>:<memoryOffset>.",
+	"Emulator will exit after N cycles.",
+	"Interactive debugging mode.",
+	"Text user interface (TUI).",
+	"Starting program counter value as <memoryOffset>.",
+	"This help."
+};
+
+char *optstring = NULL;
+
+void usage(int argc, char **argv)
+{
+	int i;
+	int numOptions;
+	int longest;
+
+	printf("%s [OPTION...]\n\n", argv[0]);
+
+	numOptions = sizeof(longopts) / sizeof(*longopts);
+	longest = 0;
+	for (i = 0; i < numOptions; ++i) {
+		if (longest < strlen(longopts[i].name)) {
+			longest = strlen(longopts[i].name);
+		}
+	}
+	for (i = 0; i < numOptions; ++i) {
+		printf("--%-*s, -%c : %s\n", longest, longopts[i].name, longopts[i].val, optdesc[i]);
+	}
+	printf("\n");
+}
+
+void parseArgs(int argc, char **argv)
+{
+	int c, i;
+	int longindex;
+	int numOptions;
+
+	numOptions = sizeof(longopts) / sizeof(*longopts);
+	optstring = malloc(numOptions * 3);
+	memset(optstring, 0, numOptions * 3);
+
+	c = 0;
+	for (i = 0; i < numOptions; ++i) {
+		c += sprintf(optstring+c, "%c%s", (char)longopts[i].val,
+					 longopts[i].has_arg == no_argument ? "" :
+					 longopts[i].has_arg == required_argument ? ":" :
+					 "::");
+	}
+
+	while ((c = getopt_long(argc, argv, optstring, longopts, &longindex)) >= 0) {
+		switch (c) {
+			case 'r':
+				romFile = optarg;
+				break;
+			case 'b':
+				addBinary(optarg, 0);
+				break;
+			case 'g':
+				addBinary(optarg, 1);
+				break;
+			case 'i':
+				beInteractive = 1;
+				break;
+			case 't':
+				beInteractive = 1;
+				tui = 1;
+				break;
+			case 'c':
+				cpu.maxCycles = strtoull(optarg, NULL, 0);
+				break;
+			case 'p':
+				cpu.startingPC = strtoull(optarg, NULL, 0);
+				break;
+			case 'h':
+				usage(argc, argv);
+				break;
+			case '?':
+				break;
+			default:
+				exit(1);
+		}
+	}
+
+	if (romFile == NULL && gBinaryList == NULL) {
+		fprintf(stderr, "Expected a ROM or binary file path.\n");
+		exit(1);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int			stop;
@@ -616,11 +587,10 @@ int main(int argc, char **argv)
 		initTUI();
 	}
 
-	//ic = 0;
 	cpu.pc = cpu.startingPC;
 	stop = 0;
 
-	dumpRegisters(1, 0, "");
+	dumpRegisters(&cpu, "", 1);
 
 	while (!stop && (cpu.maxCycles-- > 0)) {
 
@@ -629,8 +599,8 @@ int main(int argc, char **argv)
 
 		cpu.nextPC = cpu.pc + 8;
 
-		R_C1++;
-		R_C2++;
+		cpu.r[R_C1]++;
+		cpu.r[R_C2]++;
 
 		switch (o.op) {
 
@@ -645,7 +615,7 @@ int main(int argc, char **argv)
 			log("add r[%" PRIu32 "] = %" PRIX32 " + %" PRIX32, o.reg0, o.opr1, o.opr2);
 			cpu.r[o.reg0] = o.opr1 + o.opr2;
 			if ((UINT32_MAX - o.opr1) < o.opr2) {
-				R_FL |= FL_C;
+				cpu.r[R_FL] |= FL_C;
 			}
 			break;
 		case sub:
@@ -654,9 +624,9 @@ int main(int argc, char **argv)
 			break;
 		case adc:
 			log("adc r[%" PRIu32 "] = %" PRIX32 " + %" PRIX32, o.reg0, o.opr1, o.opr2);
-			cpu.r[o.reg0] = o.opr1 + o.opr2 + (R_FL & FL_C);
+			cpu.r[o.reg0] = o.opr1 + o.opr2 + (cpu.r[R_FL] & FL_C);
 			if ((UINT32_MAX - o.opr1) < o.opr2) {
-				R_FL |= FL_C;
+				cpu.r[R_FL] |= FL_C;
 			}
 			break;
 		case sbc:
@@ -734,9 +704,9 @@ int main(int argc, char **argv)
 		case cmp:
 			log("cmp r[%" PRIu32 "] %" PRIX32, o.reg0, o.opr2);
 			uint32_t temp = cpu.r[o.reg0] - o.opr2;
-			// flags.n = temp & (0x1 << 31); // enable when signed arithmetic is supported
-			flags.z = (temp == 0) ? 1 : 0;
-			flags.c = cpu.r[o.reg0] < o.opr2; // borrow?
+			// cpu.flags->n = temp & (0x1 << 31); // enable when signed arithmetic is supported
+			cpu.flags->z = (temp == 0) ? 1 : 0;
+			cpu.flags->c = cpu.r[o.reg0] < o.opr2; // borrow?
 			break;
 		case jmp:
 			address = getAddress(o.mode, o.opr2);
@@ -746,28 +716,28 @@ int main(int argc, char **argv)
 		case jz:
 			address = getAddress(o.mode, o.opr2);
 			log("jz %" PRIX32, address);
-			if (flags.z != 0) {
+			if (cpu.flags->z != 0) {
 				cpu.nextPC = address;
 			}
 			break;
 		case jnz:
 			address = getAddress(o.mode, o.opr2);
 			log("jnz %" PRIX32, address);
-			if (flags.z == 0) {
+			if (cpu.flags->z == 0) {
 				cpu.nextPC = address;
 			}
 			break;
 		case jl:
 			address = getAddress(o.mode, o.opr2);
 			log("jl %" PRIX32, address);
-			if (flags.c != 0) {
+			if (cpu.flags->c != 0) {
 				cpu.nextPC = address;
 			}
 			break;
 		case jg:
 			address = getAddress(o.mode, o.opr2);
 			log("jg %" PRIX32, address);
-			if (flags.c == 0) {
+			if (cpu.flags->c == 0) {
 				cpu.nextPC = address;
 			}
 			break;
@@ -785,7 +755,7 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		dumpRegisters(0, cpu.nextPC, cpu.msg);
+		dumpRegisters(&cpu, cpu.msg, 0);
 
 		cpu.pc = cpu.nextPC;
 		if (cpu.pc > cpu.memSize) {

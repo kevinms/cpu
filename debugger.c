@@ -50,33 +50,105 @@ static DebugInfo *gInfo;
 static int keepGoing;
 static int simpleTUI = 0;
 
-static Window *createWindow(Window *p, int h, int w, int y, int x, char *title)
+#define BP_PC 0
+#define BP_LINE 1
+#define BP_MEM_RD 2
+#define BP_MEM_WR 3
+#define BP_MEM_RDWR 4
+#define BP_FINISH 5
+
+struct breakpoint {
+	int type;
+	uint32_t condition; // Does this need to be 64 bit?
+	uint64_t maxHits;
+	uint64_t id;
+
+	/*
+	 * Generic storage for breakpoint type agnostic arguments.
+	 */
+	char opt1[512];
+	char opt2[512];
+	uint32_t num1;
+	uint32_t num2;
+
+	struct breakpoint *next;
+};
+
+struct bptype {
+	int type;
+	char *name;
+};
+
+static struct breakpoint *bp_list;
+static uint64_t bp_list_count;
+static struct bptype bp_table[] = {
+	{BP_PC, "pc"},
+	{BP_LINE, "line"},
+	{BP_MEM_RD, "rd"},
+	{BP_MEM_WR, "wr"},
+	{BP_MEM_RDWR, "rdwr"},
+	{BP_FINISH, "fin"}
+};
+
+static int shellPrint(const char *fmt, ...)
 {
-	Window *win;
+	wmove(shell->wn, shell->h - 1, 5);
 
-	if ((win = malloc(sizeof(*win))) == NULL) {
-		fprintf(stderr, "Can't allocate window struct.\n");
-		abort();
+	va_list argPtr;
+	va_start(argPtr, fmt);
+	if (simpleTUI != 0) {
+		fprintf(stderr, fmt, argPtr);
+	} else {
+		vw_printw(shell->wn, fmt, argPtr);
+		wrefresh(shell->wn);
+	}
+	va_end(argPtr);
+
+	return 0;
+}
+
+DebugInfo *mapLineToOffset(char *file, int lineNum, uint32_t *progOffset)
+{
+	int i;
+	DebugInfo *info;
+
+	/*
+	 * Find the source file that matches.
+	 */
+	for (info = gInfo; info != NULL; info = info->next) {
+		if (strcmp(info->sourceFile, file) == 0) {
+			/*
+			 * Found debug info match.
+			 */
+			break;
+		}
+	}
+	if (info == NULL) {
+		shellPrint("Can't find file %s for line: %d", file, lineNum);
+		return NULL;
 	}
 
-	win->w = w;
-	win->h = h;
-	win->x = x;
-	win->y = y;
-	if (title != NULL) {
-		win->title = strdup(title);
+	/*
+	 * Brute force search for program offset based on line number
+	 * using the simple array mapping.
+	 */
+	for (i = 0; i < info->indexCount; i++) {
+		if (info->indexLine[i] == lineNum) {
+			/*
+			 * Found match.
+			 */
+			*progOffset = info->indexOffset[i] + info->baseAddr;
+			break;
+		}
+	}
+	if (i >= info->indexCount) {
+		shellPrint("Can't map line (%d) to offset for %s\n", lineNum, file);
+		return NULL;
 	}
 
-	if ((win->wn = subwin(p->wn, win->h, win->w, win->y, win->x)) == NULL) {
-		fprintf(stderr, "Can't create register window.\n");
-		abort();
-	}
+	shellPrint("Mapped line (%d) to offset (0x%X)for %s\n", lineNum, *progOffset, file);
 
-	if (title != NULL) {
-    	mvwaddstr(win->wn, 1, (win->w - strlen(win->title)) / 2, win->title);
-	}
-
-	return win;
+	return info;
 }
 
 int loadDebugInfo(char *fileName, uint32_t baseAddr)
@@ -161,11 +233,7 @@ int loadDebugInfo(char *fileName, uint32_t baseAddr)
 
 	i = 0;
 	while ((fscanf(f, "%d %X", &lineNum, &progOffset) == 2) && !feof(f)) {
-		/*
- 		 * Store mapping in a simple array, for now.
- 		 * We index lines starting at "0" rather than "1" -- adjust.
- 		 */
-		info->indexLine[i] = lineNum - 1;
+		info->indexLine[i] = lineNum;
 		info->indexOffset[i] = progOffset;
 		i++;
 	}
@@ -205,114 +273,35 @@ ERROR:
 	return -1;
 }
 
-static int shellPrint(const char *fmt, ...)
-{
-	wmove(shell->wn, shell->h - 1, 5);
-
-	va_list argPtr;
-	va_start(argPtr, fmt);
-	if (simpleTUI != 0) {
-		fprintf(stderr, fmt, argPtr);
-	} else {
-		vw_printw(shell->wn, fmt, argPtr);
-		wrefresh(shell->wn);
-	}
-	va_end(argPtr);
-
-	return 0;
-}
-
-DebugInfo *mapLineToOffset(char *file, int lineNum, uint32_t *progOffset)
+void dumpRegisters(struct cpuState *cpu, char *message, int printHeader)
 {
 	int i;
-	DebugInfo *info;
 
-	/*
-	 * We store the lineNum -> progOffset mapping in an array. That array
-	 * is indexed starting at zero where as line numbers are usually
-	 * indexed starting at one. This seems pretty hacky... but adjust
-	 * the lineNum by 1 so that it maps into the array.
-	 */
-	lineNum--;
-
-	/*
-	 * Find the source file that matches.
-	 */
-	for (info = gInfo; info != NULL; info = info->next) {
-		if (strcmp(info->sourceFile, file) == 0) {
-			/*
-			 * Found debug info match.
-			 */
-			break;
-		}
-	}
-	if (info == NULL) {
-		shellPrint("Can't find file %s for line: %d", file, lineNum);
-		return NULL;
+	if (simpleTUI == 0) {
+		return;
 	}
 
-	/*
-	 * Brute force search for program offset based on line number
-	 * using the simple array mapping.
-	 */
-	for (i = 0; i < info->indexCount; i++) {
-		if (info->indexLine[i] == lineNum) {
-			/*
-			 * Found match.
-			 */
-			*progOffset = info->indexOffset[i] + info->baseAddr;
-			break;
-		}
-	}
-	if (i >= info->indexCount) {
-		shellPrint("Can't map line (%d) to offset for %s\n", lineNum, file);
-		return NULL;
+	if (printHeader) {
+		printf("%25s    pc   npc flags ", "");
+		for (i = 0; i < NUM_REGISTERS; i++)
+			if (i < 10) {
+				printf("   r%d ", i);
+			} else {
+				printf("  r%d ", i);
+			}
+		printf("\n");
 	}
 
-	shellPrint("Mapped line (%d) to offset (0x%X)for %s\n", lineNum, *progOffset, file);
+	printf("%-25s", message == NULL ? "" : message);
 
-	return info;
+	printf(" %5" PRIX32 " %5" PRIX32 " ", cpu->pc, cpu->nextPC);
+	printf("%c%c%c%c  ",
+	       R_FL & FL_N ? 'n' : ' ', R_FL & FL_Z ? 'z' : ' ',
+	       R_FL & FL_V ? 'v' : ' ', R_FL & FL_C ? 'c' : ' ');
+	for(i = 0; i < NUM_REGISTERS; i++)
+		printf("%5" PRIX32 " ", cpu->r[i]);
+	printf("\n");
 }
-
-#define BP_PC 0
-#define BP_LINE 1
-#define BP_MEM_RD 2
-#define BP_MEM_WR 3
-#define BP_MEM_RDWR 4
-#define BP_FINISH 5
-
-struct breakpoint {
-	int type;
-	uint32_t condition; // Does this need to be 64 bit?
-	uint64_t maxHits;
-	uint64_t id;
-
-	/*
-	 * Generic storage for breakpoint type agnostic arguments.
-	 */
-	char opt1[512];
-	char opt2[512];
-	uint32_t num1;
-	uint32_t num2;
-
-	struct breakpoint *next;
-};
-
-struct bptype {
-	int type;
-	char *name;
-};
-
-static struct breakpoint *bp_list;
-static uint64_t bp_list_count;
-static struct bptype bp_table[] = {
-	{BP_PC, "pc"},
-	{BP_LINE, "line"},
-	{BP_MEM_RD, "rd"},
-	{BP_MEM_WR, "wr"},
-	{BP_MEM_RDWR, "rdwr"},
-	{BP_FINISH, "fin"}
-};
 
 void dumpMemory(struct cpuState *cpu, int width)
 {
@@ -519,6 +508,35 @@ void listBreakpoints()
 	}
 }
 
+static Window *createWindow(Window *p, int h, int w, int y, int x, char *title)
+{
+	Window *win;
+
+	if ((win = malloc(sizeof(*win))) == NULL) {
+		fprintf(stderr, "Can't allocate window struct.\n");
+		abort();
+	}
+
+	win->w = w;
+	win->h = h;
+	win->x = x;
+	win->y = y;
+	if (title != NULL) {
+		win->title = strdup(title);
+	}
+
+	if ((win->wn = subwin(p->wn, win->h, win->w, win->y, win->x)) == NULL) {
+		fprintf(stderr, "Can't create register window.\n");
+		abort();
+	}
+
+	if (title != NULL) {
+    	mvwaddstr(win->wn, 1, (win->w - strlen(win->title)) / 2, win->title);
+	}
+
+	return win;
+}
+
 static int updateCodeWindow(Window *code, int progOffset)
 {
 	int i;
@@ -565,6 +583,13 @@ static int updateCodeWindow(Window *code, int progOffset)
 	wclrtoeol(code->wn);
 	wattroff(code->wn, COLOR_PAIR(3));
 	wattroff(code->wn, A_BOLD);
+
+	/*
+	 * We store each line of assembly text in an array indexed at 0.
+	 * That means line #1 is in element 0 of the array. Adjust the
+	 * lineNum here to account for this.
+	 */
+	lineNum--;
 
 	/*
 	 * Fill window with source lines centered around lineNum.
@@ -688,10 +713,7 @@ static int parseCommand(struct cpuState *cpu, char input[4096])
 		}
 	}
 	if (input[0] == 'r') {
-		if (simpleTUI != 0) {
-			//TODO: Should dumpRegisters() be moved to the debugger?
-			//dumpRegisters(0, cpu->nextPC, cpu->msg);
-		}
+		dumpRegisters(cpu, cpu->msg, 0);
 	}
 	if (input[0] == 'f') {
 		addBreakpoint("fin");
