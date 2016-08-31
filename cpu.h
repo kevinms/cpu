@@ -27,6 +27,7 @@ struct cpuState {
 	 */
 	uint32_t mmapIOstart;
 	uint32_t mmapIOend; 
+
 	/*
 	 * Interrupts.
 	 */
@@ -69,6 +70,9 @@ struct cpuState {
 	char		msg[4096];
 };
 
+/*
+ * Temporary stores decoded instructions.
+ */
 struct instruction {
 	uint8_t op;
 	uint8_t mode;
