@@ -978,8 +978,8 @@ int initTUI()
 	init_pair(2, COLOR_BLACK, COLOR_WHITE);
 	init_pair(3, COLOR_BLUE, COLOR_BLACK);
 
-    /*
-	 * Switch of echoing and enable keypad (for arrow keys).
+	/*
+	 * Switch off echoing and enable keypad (for arrow keys).
 	 */
 	cbreak();
 	noecho();
