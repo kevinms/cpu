@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <signal.h>
 
 #include "debugger.h"
 #include "isa.h"
@@ -101,6 +102,7 @@ static int shellPrint(const char *fmt, ...)
 	} else {
 		vw_printw(shell->wn, fmt, argPtr);
 		wrefresh(shell->wn);
+		refresh();
 	}
 	va_end(argPtr);
 
@@ -793,9 +795,95 @@ static int parseCommand(struct cpuState *cpu, char input[4096])
 	return 0;
 }
 
+static sig_atomic_t caughtSignal;
+static sigset_t caughtSignalSet;
+
+void signalHandler(int signal)
+{
+	caughtSignal = 1;
+
+	/*
+	 * Add the signal to a set, so we can log it outside of the signal handler.
+	 */
+	sigaddset(&caughtSignalSet, signal);
+
+	/*
+	 *  Disable flushing of the input buffer when an interrupt key
+	 *  (kill, suspend or quit) is pressed.
+	 */
+	noqiflush();
+}
+
+int signalsToCatch[] = {SIGHUP, SIGINT, SIGTERM};
+
+static int catchSignals()
+{
+	struct sigaction action;
+
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = signalHandler;
+	action.sa_flags = SA_RESTART;
+
+	sigemptyset(&action.sa_mask);
+
+	int i;
+	for (i = 0; i < sizeof(signalsToCatch) / sizeof(*signalsToCatch); i++) {
+		if (sigaction(signalsToCatch[i], &action, NULL) < 0) {
+			shellPrint("Can't catch signal %s: %s\n",
+					   strsignal(signalsToCatch[i]), strerror(errno));
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+static int uncatchSignals()
+{
+	struct sigaction action;
+
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = SIG_DFL;
+
+	int i;
+	for (i = 0; i < sizeof(signalsToCatch) / sizeof(*signalsToCatch); i++) {
+		if (sigaction(signalsToCatch[i], &action, NULL) < 0) {
+			shellPrint("Can't uncatch signal %s: %s\n",
+					   strsignal(signalsToCatch[i]), strerror(errno));
+			return -1;
+		}
+	}
+
+	sigemptyset(&caughtSignalSet);
+	caughtSignal = 0;
+
+	return 0;
+}
+
+static inline int checkForSignals()
+{
+	if (caughtSignal > 0) {
+		int i;
+		for (i = 0; i < _NSIG; i++) {
+			if (sigismember(&caughtSignalSet, i) > 0) {
+				shellPrint("Halting execution -- caught signal: %s\n",
+						   strsignal(i));
+			}
+		}
+
+		return 1;
+	}
+
+	return 0;
+}
+
 static int updateShellWindow(Window *shell, struct cpuState *cpu, struct instruction *o)
 {
 	char	input[4096];
+
+	if (checkForSignals() > 0) {
+		keepGoing = 0;
+	}
 
 	if (hitBreakpoint(cpu, o) != 0) {
 		keepGoing = 0;
@@ -804,6 +892,11 @@ static int updateShellWindow(Window *shell, struct cpuState *cpu, struct instruc
 	if (keepGoing != 0) {
 		return 0;
 	}
+
+	/*
+	 * Remove signal handlers while waiting for shell input.
+	 */
+	uncatchSignals();
 
 	while (1) {
 		/*
@@ -822,6 +915,11 @@ static int updateShellWindow(Window *shell, struct cpuState *cpu, struct instruc
 			break;
 		}
 	}
+
+	/*
+	 * Set signal handlers before handing control back to the emulator.
+	 */
+	catchSignals();
 
 	return 0;
 }
@@ -852,6 +950,11 @@ int updateSimple(struct cpuState *cpu, struct instruction *o)
 
 int initTUI()
 {
+	/*
+	 * Must initialize a few signal handling variables.
+	 */
+	sigemptyset(&caughtSignalSet);
+
 	if (simpleTUI != 0) {
 		return 0;
 	}
@@ -878,6 +981,7 @@ int initTUI()
     /*
 	 * Switch of echoing and enable keypad (for arrow keys).
 	 */
+	cbreak();
 	noecho();
 	keypad(top.wn, TRUE);
 	set_tabsize(4);

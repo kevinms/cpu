@@ -26,7 +26,8 @@ kernel:
 	./assembler.py -a progs/all.kernel.asm --binary --debug > progs/kernel.rom
 
 sane:
-	stty sane^J
+	stty sane
+	reset
 
 clean:
 	rm -f emulator fs heap
