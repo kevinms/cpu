@@ -63,7 +63,7 @@ export .init_malloc
 
 	; return to caller
 	ldw r4 sp
-	add sp sp 2
+	add sp sp 4
 	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -180,7 +180,8 @@ export .malloc
 		;
 		; Update "this" object's size.
 		;
-		stw @r1 r0 ; this.size = requestedSize
+		or r2 r0 0x80000000 ; Set the 32nd bit to indicate it is used.
+		stw @r1 r2          ; this.size = requestedSize
 
 	;
 	; Attach this object to used list.
@@ -197,20 +198,120 @@ export .malloc
 	stw @r3 r1 ; super.usedOffset = this
 
 	.__l_malloc_return ; Return to caller.
-	mov r3 r1 ; Return address of new block.
+	add r3 r1 12 ; Return addres of new block's data.
 	ldw r4 sp
-	add sp sp 2
+	add sp sp 4
 	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Free a region of dynamically allocated memory.
 ;
-; in r0 address of allocation
+; in @r0 address of allocation
 export .free
+
+	sub r0 r0 12 ; this.header
+
+	;
+	; If the 32nd bit is not set, something is very wrong.
+	;
+	ldw r1 @r0 ; this.header.length
+	and r1 r1 0x80000000
+	jnz .__l_free_valid
+		;
+		; Something is very wrong... Possibly, the caller gave us a
+		; bogus address.
+		;
+		jmp .__l_free_return
+	.__l_free_valid
+
+	;
+	; Detach from used list.
+	;
+	.__l_free_detach
+	add r1 r0 4
+	add r2 r0 8
+	ldw r1 @r1  ; this.prevOffset
+	ldw r2 @r2  ; this.nextOffset
+
+	cmp r1 0
+	jnz .__l_free_usedhead
+		ldw r3 @.__heapOffset
+		add r3 r3 4
+		stw @r3 r2 ; super.freeOffset = this.nextOffset
+	.__l_free_usedhead
+
+	cmp r1 0
+	jz .__l_free_noprev
+		add r3 r1 8
+		stw @r3 r2 ; prev.nextOffset = this.nextOffset
+	.__l_free_noprev
+
+	cmp r2 0
+	jz .__l_free_nonext
+		add r3 r2 8
+		stw @r3 r1 ; next.prevOffset = this.prevOffset
+	.__l_free_nonext
+
+	;
+	; Do we need to coalesce with left and right neighbors?
+	;
+	; +---------------------------+
+	; | Left N. | This | Right N. |
+	; +---------------------------+
+	;
+
+	;
+	; Check if the left neighbor is free.
+	;
+	sub r1 r0 4
+	ldw r1 @r1  ; left.trailer.headerOffset
+	ldw r1 @r1  ; left.header.length
+
+	and r2 r1 0x80000000
+	cmp r2 0
+	jz .__l_free_leftused
+		;TODO: Coalesce
+	.__l_free_leftused
+
+	;
+	; Check if the right neighbor is free.
+	;
+	ldw r1 @r0   ; this.length
+	add r1 r1 16 ; right.header
+	ldw r2 @r1   ; right.header.length
+
+	and r2 r2 0x80000000
+	cmp r2 0
+	jz .__l_free_rightused
+		;TODO: Coalesce
+	.__l_free_rightused
+
+	;
+	; Attach this object to free list.
+	;
+	add r1 r0 4
+	stw @r1 0   ; this.prevOffset = 0
+
+	ldw r2 @.__heapOffset
+	add r2 r2 4
+	ldw r3 @r2 ; super.freeOffset
+
+	add r2 r0 8
+	stw @r1 r3 ; this.nextOffset = super.freeOffset
+	stw @r2 r0 ; super.freeOffset = this
+
+	;
+	; Clear the 32nd bit to indicate it is free.
+	;
+	ldw r1 @r0
+	and r1 r1 0x7FFFFFFF ; ~0x80000000
+	stw @r0 r1
+
+	.__l_free_return
 
 	; return to caller
 	ldw r4 sp
-	add sp sp 2
+	add sp sp 4
 	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -261,7 +362,7 @@ export .memset
 
 	; return to caller
 	ldw r4 sp
-	add sp sp 2
+	add sp sp 4
 	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -286,7 +387,7 @@ export .strlen
 
 	; return to caller
 	ldw r4 sp
-	add sp sp 2
+	add sp sp 4
 	jmp r4
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -308,5 +409,5 @@ export .strcpy
 
 	; return to caller
 	ldw r4 sp
-	add sp sp 2
+	add sp sp 4
 	jmp r4

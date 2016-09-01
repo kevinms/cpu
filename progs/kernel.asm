@@ -58,6 +58,12 @@ stw sp .ra_task
 jmp .malloc
 .ra_task
 
+mov r0 r3 ; r3 contains the return value from the previous malloc
+sub sp sp 4
+stw sp .ra_free
+jmp .free
+.ra_free
+
 ;
 ; Allocate another one!
 ;

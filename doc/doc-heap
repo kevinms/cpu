@@ -54,7 +54,8 @@ All free objects are connected in another doubly linked list.
 
 Each header contains a next and prev offset for the doubly linked list.
 The length field denotes how much space the object takes up minus the
-size of the header and trailer.
+size of the header and trailer. The 32'nd bit in the length is used to
+indicate if the object is free (0) or used (1).
 
 struct header {
 	uint32_t length;
