@@ -1,0 +1,42 @@
+#######################################################################
+#
+# Machine Code Specification
+#
+#######################################################################
+
+Every machine instruction has a fixed width of 8 bytes.
+
+0        8        16       24       32                                 63
++--------+--------+--------+--------+-----------------------------------+
+| opcode |  mode  |  opr0  |  opr1  |                opr2               |
++--------+--------+--------+--------+-----------------------------------+
+
+The mode is a bitfield of 8 bits. Most are unused at this time. Starting
+at the least significant bit:
+
+	Bit 0 specifies the data addressing mode for opr2.
+		0b0  - Immediate Value
+		0b1  - Register Direct
+
+	Bit 1 specifies code addressing mode.
+		0b00 - Base + Offset
+		0b10 - Absolute Offset
+
+#######################################################################
+# Example:
+
+Assembly instruction:
+
+	mov r0 r3
+
+Machine instruction:
+
+	opcode   mode     opr0     opr1     opr2
+	00001011 00000001 00000000 00000000 00000000000000000000000000000011
+
+	opcode: Maps to the "mov" instruction.
+	mode:   Bit 0 of the mode bit says to use register direct mode for opr2.
+	opr0:   Maps to register 0.
+	opr1:   Unused.
+	opr2:   Maps to register 3.
+
