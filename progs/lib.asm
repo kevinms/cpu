@@ -277,6 +277,7 @@ export .free
 	; Check if the right neighbor is free.
 	;
 	ldw r1 @r0   ; this.length
+	and r1 r1 0x7FFFFFFF
 	add r1 r1 16 ; right.header
 	ldw r2 @r1   ; right.header.length
 

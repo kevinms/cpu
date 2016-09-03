@@ -245,6 +245,10 @@ static int loadROM(char *path)
 
 static void freeEnvironment()
 {
+	if (tui != 0) {
+		freeTUI();
+	}
+
 	if (cpu.mem != NULL) {
 		if (munmap(cpu.mem, cpu.memSize) != 0) {
 			fprintf(stderr, "Can't munmap memory: %s\n", strerror(errno));
@@ -259,10 +263,6 @@ static void freeEnvironment()
 		gBinaryList = gBinaryList->next;
 		free(thisBinary->filePath);
 		free(thisBinary);
-	}
-
-	if (tui != 0) {
-		freeTUI();
 	}
 }
 
@@ -317,9 +317,9 @@ static int initEnvironment()
 }
 
 static uint32_t
-fetchInst(uint32_t lpc, struct instruction *o)
+fetchInst(uint32_t pc, struct instruction *o)
 {
-	uint8_t *i = cpu.mem + lpc;
+	uint8_t *i = cpu.mem + pc;
 
 	/*
 	 * Decode the instruction into it's logical pieces.
@@ -342,7 +342,7 @@ fetchInst(uint32_t lpc, struct instruction *o)
 		o->opr2 = cpu.r[o->raw2];
 	}
 
-	return(lpc + 8);
+	return(pc + 8);
 } 
 
 static void interactive()
@@ -445,13 +445,25 @@ static  uint32_t *mmapIOregister(uint32_t address)
 	return(NULL);
 }
 
+static inline void isValidAddress(uint32_t address)
+{
+	if (address >= cpu.memSize) {
+		fprintf(stderr, "Invalid memory read at 0x%X\n", address);
+		abort();
+	}
+}
+
 static uint8_t read8bit(uint32_t address)
 {
+	isValidAddress(address);
+
 	return cpu.mem[address];
 }
 
 static uint32_t read32bit(uint32_t address)
 {
+	isValidAddress(address + 3);
+
 	if (address < cpu.mmapIOstart || address >= cpu.mmapIOend) {
 		/*
 		 * Normal memory access.
@@ -476,11 +488,15 @@ static uint32_t read32bit(uint32_t address)
 
 static void write8bit(uint32_t address, uint8_t data)
 {
+	isValidAddress(address);
+
 	cpu.mem[address] = data;
 }
 
 static void write32bit(uint32_t address, uint32_t data)
 {
+	isValidAddress(address + 3);
+
 	if (address < cpu.mmapIOstart || address >= cpu.mmapIOend) {
 		/*
 		 * Normal memory access.

@@ -32,7 +32,12 @@
 // Instruction Op Codes
 #define nop  0b00000000
 
-//      inst opcode      mode dest   lhs   rhs
+// r - register
+// c - constant
+// @ - absolute addresing
+// varopt determines which operand supports immediate mode (c)
+
+//      inst opcode    varopt dest   lhs   rhs
 #define add  0b00000001 // 2  d[r]   l[r]  r[r,c]
 #define sub  0b00000010 // 2  d[r]   l[r]  r[r,c]
 #define adc  0b00000011 // 2  d[r]   l[r]  r[r,c]
@@ -55,7 +60,7 @@
 #define lsr  0b00010001 // 2  d[r]   l[r]  r[r,c]
 
 // Jump / conditional branches
-#define cmp  0b00010010 // 2  d[r] src[r,c]
+#define cmp  0b00010010 // 1  d[r] src[r,c]
 #define jmp  0b00010011 // 0  d[@,r,c]
 #define jz   0b00010100 // 0  d[@,r,c]
 #define jnz  0b00010101 // 0  d[@,r,c]

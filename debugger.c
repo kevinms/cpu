@@ -1031,12 +1031,12 @@ void freeTUI()
 		return;
 	}
 
+	deleteAllBreakpoints();
+
 	freeWindow(code);
 	freeWindow(mem);
 	freeWindow(regs);
 	freeWindow(shell);
-
-	deleteAllBreakpoints();
 
 	while (gInfo != NULL) {
 		DebugInfo *info = gInfo;

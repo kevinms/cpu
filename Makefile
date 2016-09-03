@@ -11,7 +11,7 @@ os: bios lib kernel
 	echo "Building full OS stack."
 	rm -f sd.img
 	./fs -i sd.img -n4096
-	./fs -i sd.img -a progs/kernel.bin
+	./fs -i sd.img -a progs/all.kernel.bin
 	./fs -i sd.img -a progs/lib.bin
 	./fs -i sd.img -l
 
@@ -23,7 +23,7 @@ lib:
 
 kernel:
 	cat progs/lib.sym progs/kernel.asm > progs/all.kernel.asm
-	./assembler.py -a progs/all.kernel.asm --binary --debug > progs/kernel.rom
+	./assembler.py -a progs/all.kernel.asm --binary --debug > progs/all.kernel.rom
 
 sane:
 	stty sane
