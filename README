@@ -27,3 +27,8 @@ sudo apt-get install libncurses5 libncurses5-dev
 # Run the kernel using the debugger.
 #
 ./emulator -b progs/bios.bin:0x4000 -b sd.img:0x5000 -g progs/all.kernel.bin:0x0 -g progs/lib.bin:0x3000 -p 0x4000 -i -t 2> error.out
+
+#
+# Dump heap contents in human readable format.
+#
+./heap -m emulator.memory -o 0x10000 -z $(( 0x1FF0000 )) -s

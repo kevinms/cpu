@@ -781,10 +781,10 @@ int main(int argc, char **argv)
 				cpu.nextPC = address;
 			}
 			break;
-		case jg:
+		case jge:
 			address = getAddress(o.mode, o.opr2);
 			log("jg %" PRIX32, address);
-			if (cpu.flags->c == 0) {
+			if ((cpu.flags->c == 0) || (cpu.flags->z != 0)) {
 				cpu.nextPC = address;
 			}
 			break;

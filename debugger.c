@@ -91,6 +91,8 @@ static struct bptype bp_table[] = {
 	{BP_FINISH, "fin"}
 };
 
+#define TAB_WIDTH 4
+
 static int shellPrint(const char *fmt, ...)
 {
 	wmove(shell->wn, shell->h - 1, 5);
@@ -642,7 +644,16 @@ static int updateCodeWindow(Window *code, int progOffset)
 	if (nextLine < 0) {
 		nextLine = 0;
 	}
-	for (i = 0; i < maxLines && nextLine < info->lineCount; i++, nextLine++) {
+	for (i = 0; i < maxLines; i++, nextLine++) {
+		if (nextLine >= info->lineCount) {
+			/*
+			 * We are past the last line of the file -- print empty lines.
+			 */
+			wmove(code->wn, 1 + i, 2);
+			wclrtoeol(code->wn);
+			continue;
+		}
+
 		wattron(code->wn, COLOR_PAIR(1));
 		wattron(code->wn, A_BOLD);
 		mvwprintw(code->wn, 1 + i, 2, "%4d", nextLine + 1);
@@ -664,7 +675,7 @@ static int updateCodeWindow(Window *code, int progOffset)
 		for (charCount = 0; charCount < strlen(info->text[nextLine]); charCount++) {
 			int len = 1;
 			if (info->text[nextLine][charCount] == '\t') {
-				len = 4;
+				len = TAB_WIDTH;
 			}
 			if (expandedCount + len >= code->w - 7) {
 				break;
@@ -984,7 +995,7 @@ int initTUI()
 	cbreak();
 	noecho();
 	keypad(top.wn, TRUE);
-	set_tabsize(4);
+	set_tabsize(TAB_WIDTH);
 
 	int i;
 	int w, h;

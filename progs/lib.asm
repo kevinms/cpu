@@ -39,8 +39,8 @@ export .init_malloc
 	stw @r2 r0
 
 	add r3 r0 r1 ; end of heap offset
-	add r2 r0 12 ; free object header offset
-	sub r3 r3 4  ; free object trailer offset
+	add r2 r0 .__heapHeader  ; free object header offset
+	sub r3 r3 .__heapTrailer ; free object trailer offset
 	sub r4 r1 .__heapSuper
 	sub r4 r4 .__heapHeaderTrailer ; free object length
 
@@ -88,7 +88,7 @@ export .malloc
 
 		ldw r2 @r1 ; this.length
 		cmp r2 r0
-		jg .__l_malloc_detach
+		jge .__l_malloc_detach
 
 		add r1 r1 8
 		ldw r1 @r1 ; this.nextOffset
@@ -198,7 +198,7 @@ export .malloc
 	stw @r3 r1 ; super.usedOffset = this
 
 	.__l_malloc_return ; Return to caller.
-	add r3 r1 12 ; Return addres of new block's data.
+	add r3 r1 .__heapHeader ; Return addres of new block's data.
 	ldw r4 sp
 	add sp sp 4
 	jmp r4
@@ -209,7 +209,7 @@ export .malloc
 ; in @r0 address of allocation
 export .free
 
-	sub r0 r0 12 ; this.header
+	sub r0 r0 .__heapHeader ; this.header
 
 	;
 	; If the 32nd bit is not set, something is very wrong.
@@ -236,8 +236,8 @@ export .free
 	cmp r1 0
 	jnz .__l_free_usedhead
 		ldw r3 @.__heapOffset
-		add r3 r3 4
-		stw @r3 r2 ; super.freeOffset = this.nextOffset
+		add r3 r3 8
+		stw @r3 r2 ; super.usedOffset = this.nextOffset
 	.__l_free_usedhead
 
 	cmp r1 0
@@ -261,31 +261,50 @@ export .free
 	;
 
 	;
-	; Check if the left neighbor is free.
+	; Is there a left neighbor?
 	;
-	sub r1 r0 4
-	ldw r1 @r1  ; left.trailer.headerOffset
-	ldw r1 @r1  ; left.header.length
+	ldw r1 @.__heapOffset
+	add r1 r1 .__heapHeader
+	cmp r1 r0
+	jge .__l_free_skipleft
+		;
+		; Is the left neighbor free?
+		;
+		sub r1 r0 4
+		ldw r1 @r1  ; left.trailer.headerOffset
+		ldw r1 @r1  ; left.header.length
 
-	and r2 r1 0x80000000
-	cmp r2 0
-	jz .__l_free_leftused
-		;TODO: Coalesce
-	.__l_free_leftused
+		and r2 r1 0x80000000
+		cmp r2 0
+		jz .__l_free_skipleft
+			;TODO: Coalesce
+
+	.__l_free_skipleft
 
 	;
-	; Check if the right neighbor is free.
+	; Is there a right neighbor?
 	;
-	ldw r1 @r0   ; this.length
+	ldw r3 @.__heapOffset  ; super
+	ldw r4 @r3             ; super.size
+	add r3 r3 r4           ; end of heap
+
+	ldw r1 @r0             ; this.length
 	and r1 r1 0x7FFFFFFF
-	add r1 r1 16 ; right.header
-	ldw r2 @r1   ; right.header.length
+	add r1 r0 r1           ; this.trailer
+	add r1 r1 .__heapHeaderTrailer ; right.header
+	cmp r1 r3
+	jge .__l_free_skipright
+		;
+		; Is the right neighbor free?
+		;
+		ldw r2 @r1   ; right.header.length
 
-	and r2 r2 0x80000000
-	cmp r2 0
-	jz .__l_free_rightused
-		;TODO: Coalesce
-	.__l_free_rightused
+		and r2 r2 0x80000000
+		cmp r2 0
+		jz .__l_free_skipright
+			;TODO: Coalesce
+
+	.__l_free_skipright
 
 	;
 	; Attach this object to free list.
@@ -295,10 +314,18 @@ export .free
 
 	ldw r2 @.__heapOffset
 	add r2 r2 4
-	ldw r3 @r2 ; super.freeOffset
+	ldw r3 @r2 ; super.freeOffset (freeHead)
+
+	cmp r3 0
+	jz .__l_free_emptylist
+		add r4 r3 4 ; freeHead.prevOffset
+		stw @r4 r0  ; freeHead.prevOffset = this
+	.__l_free_emptylist
 
 	add r2 r0 8
-	stw @r1 r3 ; this.nextOffset = super.freeOffset
+	stw @r2 r3 ; this.nextOffset = super.freeOffset
+	ldw r2 @.__heapOffset
+	add r2 r2 4
 	stw @r2 r0 ; super.freeOffset = this
 
 	;

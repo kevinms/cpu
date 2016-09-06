@@ -65,7 +65,7 @@
 #define jz   0b00010100 // 0  d[@,r,c]
 #define jnz  0b00010101 // 0  d[@,r,c]
 #define jl   0b00010110 // 0  d[@,r,c]
-#define jg   0b00010111 // 0  d[@,r,c]
+#define jge  0b00010111 // 0  d[@,r,c]
 
 #define in   0b00011001
 #define out  0b00011010

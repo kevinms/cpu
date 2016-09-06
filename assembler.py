@@ -115,7 +115,7 @@ def loadLabels(source):
 				labels[tokens[0][1:]] = progOffset
 			if export:
 				exportSymbol(tokens[0][1:])
-			debug("%d:%s -> %X" % (lineNum, tokens[0][1:], labels[tokens[0][1:]]))
+			#debug("%d:%s -> %X" % (lineNum, tokens[0][1:], labels[tokens[0][1:]]))
 		elif tokens[0] == 'w':
 			progOffset += 4
 		elif tokens[0] == 'b':
