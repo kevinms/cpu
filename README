@@ -1,7 +1,10 @@
-# sudo apt-get install libncurses5 libncurses5-dev
+#
+# Install dependencies.
+#
+sudo apt-get install libncurses5 libncurses5-dev
 
 #
-# Build a ROM file from assembly code.
+# Build a ROM and binary file from assembly code.
 #
 ./assembler.py --assemble test.asm -b test.bin > test.rom
 
@@ -11,6 +14,11 @@
 ./emulator -r test.rom
 
 #
+# Run the binary in the emulator.
+#
+./emulator -b test.bin:0x0
+
+#
 # Run the kernel in the emulator.
 #
 ./emulator -b progs/bios.bin:0x4000 -b sd.img:0x5000 -p 0x4000 -i
@@ -18,4 +26,4 @@
 #
 # Run the kernel using the debugger.
 #
-./emulator -b progs/bios.bin:0x4000 -b sd.img:0x5000 -g progs/all.kernel.bin:0x0 -g progs/lib.bin:0x3000 -p 0x4000 -i -t
+./emulator -b progs/bios.bin:0x4000 -b sd.img:0x5000 -g progs/all.kernel.bin:0x0 -g progs/lib.bin:0x3000 -p 0x4000 -i -t 2> error.out

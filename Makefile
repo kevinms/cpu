@@ -4,6 +4,9 @@ all:
 	gcc -Wall -g fs.c -o fs
 	gcc -Wall -g heap.c -o heap
 
+#
+# Instrument for profiling with gprof.
+#
 debug:
 	gcc -Wall -g -pg emulator.c debugger.c -lncurses -o emulator
 

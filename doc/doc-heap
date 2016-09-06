@@ -17,9 +17,9 @@ objects.
 | Object N    |
 +-------------+
 
-The super block contains a magic number that acts as both a signataure
-and version number. There are offsets to the used and free lists which
-are discussed more below.
+The super block contains a size field to indicates the total size of
+the heap. There are offsets to the used and free lists which are
+discussed more below.
 
 struct superBlock {
 	uint32_t size;

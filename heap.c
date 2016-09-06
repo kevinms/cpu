@@ -125,6 +125,7 @@ struct heapTrailer {
 #define OBJECT_HEADER   ((uint32_t)sizeof(struct heapHeader))
 #define OBJECT_TRAILER  ((uint32_t)sizeof(struct heapTrailer))
 #define OBJECT_OVERHEAD ((uint32_t)(sizeof(struct heapHeader) + sizeof(struct heapTrailer)))
+#define OBJECT_USED     ((uint32_t)0x80000000)
 
 static void *mapping;
 
@@ -167,6 +168,11 @@ int openMemoryFile()
 	return(0);
 }
 
+#define C_RED     "\x1B[1;31m"
+#define C_GREEN   "\x1B[1;32m"
+#define C_MAGENTA "\x1B[1;35m"
+#define C_NO      "\x1B[0m"
+
 void printHeapInfo()
 {
 	fprintf(stderr, "heapSuperBlock: 0x%" PRIX32 "\n", OBJECT_SUPER);
@@ -177,20 +183,23 @@ void printHeapInfo()
 void printHeapSuperBlock(struct heapSuperBlock *super)
 {
 	fprintf(stderr, "Super Block at 0x%" PRIX32 ":\n", (uint32_t)(((void *)super) - mapping));
-	fprintf(stderr, "\tsize:       0x%" PRIX32 "\n", super->size);
-	fprintf(stderr, "\tfreeOffset: 0x%" PRIX32 "\n", super->freeOffset);
-	fprintf(stderr, "\tusedOffset: 0x%" PRIX32 "\n", super->usedOffset);
+	fprintf(stderr, "    size:       0x%" PRIX32 "\n", super->size);
+	fprintf(stderr, "    freeOffset: 0x%" PRIX32 "\n", super->freeOffset);
+	fprintf(stderr, "    usedOffset: 0x%" PRIX32 "\n", super->usedOffset);
 }
 
 void printHeapObject(struct heapHeader *header, struct heapTrailer *trailer)
 {
-	fprintf(stderr, "Header at 0x%" PRIX32 ":\n", (uint32_t)(((void *)header) - mapping));
-	fprintf(stderr, "\tlength:      0x%" PRIX32 "\n", header->length);
-	fprintf(stderr, "\tprevOffset:  0x%" PRIX32 "\n", header->prevOffset);
-	fprintf(stderr, "\tnextOffset:  0x%" PRIX32 "\n", header->nextOffset);
+	uint32_t headerOffset = ((void *)header) - mapping;
+	fprintf(stderr, "Header at 0x%" PRIX32 " (%s):\n", headerOffset,
+			header->length & OBJECT_USED ? C_GREEN "used" C_NO : C_MAGENTA "free" C_NO);
+	fprintf(stderr, "    length:      0x%" PRIX32 " -> 0x%" PRIX32 "\n", header->length, header->length & ~OBJECT_USED);
+	fprintf(stderr, "    prevOffset:  0x%" PRIX32 "\n", header->prevOffset);
+	fprintf(stderr, "    nextOffset:  0x%" PRIX32 "\n", header->nextOffset);
 
-	fprintf(stderr, "Trailer at 0x%" PRIX32 "\n", (uint32_t)(((void *)trailer) - mapping));
-	fprintf(stderr, "\theaderOffset: 0x%" PRIX32 "\n", trailer->headerOffset);
+	fprintf(stderr, "  Trailer at 0x%" PRIX32 "\n", (uint32_t)(((void *)trailer) - mapping));
+	fprintf(stderr, "    headerOffset: 0x%" PRIX32 "%s\n", trailer->headerOffset,
+			headerOffset != trailer->headerOffset ? C_RED " Incorrect!" : "");
 }
 
 int scanHeap()
@@ -204,9 +213,9 @@ int scanHeap()
 
 	for (thisOffset = OBJECT_SUPER;
 		 thisOffset < heapSize;
-		 thisOffset = thisOffset + thisHeader->length + OBJECT_OVERHEAD) {
+		 thisOffset = thisOffset + (thisHeader->length & ~OBJECT_USED) + OBJECT_OVERHEAD) {
 		thisHeader = mapping + heapOffset + thisOffset;
-		thisTrailer = mapping + heapOffset + thisOffset + thisHeader->length + OBJECT_HEADER;
+		thisTrailer = mapping + heapOffset + thisOffset + (thisHeader->length & ~OBJECT_USED) + OBJECT_HEADER;
 
 		printHeapObject(thisHeader, thisTrailer);
 	}
