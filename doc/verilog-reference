@@ -1,0 +1,209 @@
+Parameter:
+
+	A constant whose value is determined at compile-time.
+
+	parameter identifier = expression;
+
+	Parameters are used wherever a constant expression is allowed.
+
+		parameter width = 8, msb = 7, lsb = 0;
+		parameter delay = 100;
+		parameter maxval = (1 << width) - 1;
+		parameter r = 5.7;
+		parameter state1 = 4'b0001, state2 = 4'b0010, 
+				  state3 = 4'b0100, state4 = 4'b1000;
+
+Nets:
+
+	Nets are the things that connect model components together. They are
+	usually thought of as wires in a circuit. Nets are declared in statements
+	like this:
+
+	net_type [range] [delay3] list_of_net_identifiers ;
+	net_type [drive_strength] [range] [delay3] list_of_net_decl_assignments ;
+
+	range  - How many bits wide the net should be of the form [msb:lsb].
+	delay3 - This is a numeric value which specifies the length of time between
+			 when a driver on this net changes value and when that value is
+			 seen by other elements the net drives. The "3" indicates that this
+			 can be a single number or three numbers, for rise, fall, and
+			 turnoff delays.
+
+	Typical net declarations would be:
+
+		wire w1, w2;
+		tri [31:0] bus32;
+		wire wire_number_5 = wire_number_2 & wire_number_3;
+
+Instantiation:
+
+	The module definition by itself does not create a module. Modules are
+	created by being instantiated in another module, like this:
+
+	module <module_name_1> (<portlist>);
+	...
+		<module_name_2> <instance_name> (<portlist>);
+	...
+	endmodule
+
+	Typical examples:
+
+		and #1 a1 (a, b, c);
+		and (a,b,c), (d,e,f);
+
+Registers:
+
+	 reg [range] list_of_register_identifiers ;
+	 or   integer list_of_register_identifiers ;
+	 or   time list_of_register_identifiers ;
+	 or   real list_of_real_identifiers ;
+	 or   realtime list_of_real_identifiers ;
+
+	 Typical register declarations would be:
+
+		reg r1, r2;
+		reg [31:0] bus32;
+		integer i;
+		real fx1, fx2;
+	
+	Registers are storage elements. Values are stored in registers in
+	procedural assignment statements. Registers can be used as the source for
+	a primitive or module instance (i.e. registers can be connected to input
+	ports), but they cannot be driven in the same way a net can.
+
+Continuous Assignments:
+
+	assign [drive_strength] [delay3] list_of_net_assignments ;
+
+	Examples: 
+		assign w1 = w2 & w3;
+		assign (strong1, pull0) mynet = enable;
+		assign #1 busout = enable ? data : 16'bz;
+	
+	The left-hand side must be a net. The reason is registers get values at
+	discrete times, but nets are always driven by a value. Changes to a net
+	may happen asynchronously, any time anything on the right-hand side
+	changes, the left-hand side may change it's value. A net is continuously
+	driven.
+
+	Propagation
+
+		Declarative statements in general, and continuous assignments in
+		particular, are controlled by signal propagation. Propagation is the
+		process of updating expression values and subsequently signals which
+		depend on those values. It can be illustrated by the following:
+
+			assign x = f(in);
+			assign y = g(x);
+			assign out = h(y);
+
+		Continuous assign statements are not executed in source order.
+
+		The result of this process is that when in changes, the effects will
+		ripple through all continuous assignments which depend on it until
+		all signals which appear on the left hand sides of the assignments
+		are updated.
+
+Procedural Blocks:
+
+	Each block is a sequences of statements that are executed sequentially,
+	but the blocks themselves are concurrent and asynchronous to other blocks.
+
+	There is no defined order between blocks. There is no guarantee that any
+	statement will execute before or after any other statement which is not
+	in the same block unless there is a time or event control to establish
+	that relationship.
+
+	initial:
+
+		All initial blocks begin at time 0 and execute the initial statement.
+		There may be time or event controls, as well as all of the control
+		constructs in the language. As a result, an initial block may cause
+		activity to occur throughout the entire simulation of the model.
+
+		initial <statement>
+		initial begin
+			<statement>
+			<statement>
+		end
+
+	always:
+
+		Always blocks also begin at time 0. The only difference between an always
+		block and an initial block is that when the always statement finishes
+		execution, it starts executing again.
+
+		always <statement>
+		always begin
+			<statement>
+			<statement>
+		end
+
+	Examples:
+
+		always @(posedge clock) sample = #1 x;
+		always @(posedge clock) sample = x;
+
+Tasks
+
+	Time can elapse during the execution of a task, according to time and
+	event controls in the task definition. Tasks may have zero or more
+	arguments, and they may be input, output, or inout arguments.
+	
+	Example:
+
+		task do_read;
+			input [15:0] addr;
+			output [7:0] value;
+
+			begin
+				adbus_reg = addr;       // put address out
+				adbus_en = 1;           // drive address bus
+				@(posedge clk) ;        // wait for the next clock
+				while (~ack)
+					@(posedge clk);     // wait for ack
+				value = data_bus;       // take returned value
+				adbus_en = 0;           // turn off address bus
+				count = count + 1;      // how many have we done
+			end
+		endtask
+
+		initial begin
+			...
+			do_read('h0000, val);
+			if (val != 'h81) $display("Error!");
+			do_read('h5a5a, val);
+			...
+		end
+
+
+Functions:
+
+	In contrast to tasks, functions must execute in a single instant of
+	simulated time. That is, not time or delay controls are allowed in a
+	function. Function arguments are also restricted to inputs only.
+	Output and inout arguments are not allowed. The output of a function
+	is indicated by an assignment to the function name. For example,
+
+		function [15:0] relocate;
+			input [11:0] addr;
+			input [3:0] relocation_factor;
+
+			begin
+				relocate = addr + (relocation_factor<<12);
+				count = count + 1; // how many have we done
+			end
+		endfunction
+
+		assign absolute_address = relocate(relative_address, rf);
+
+		initial begin
+			...
+			rf = 0x2;
+			relative_address = 0xffc;
+			$display("the relocated address is %0x",
+			relocate(relative_address, rf));
+			...
+		end
+
+
