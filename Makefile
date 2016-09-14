@@ -3,6 +3,7 @@ all:
 	gcc -Wall -g emulator.c debugger.c -lncurses -o emulator
 	gcc -Wall -g fs.c -o fs
 	gcc -Wall -g heap.c -o heap
+	gcc -Wall -g compiler.c -o compiler
 
 #
 # Instrument for profiling with gprof.

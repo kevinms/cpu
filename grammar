@@ -1,4 +1,16 @@
-IDENTIFIER CONSTANT STRING
+#
+# ASCII - The normal ASCII character set using escape
+#         sequences where necessary i.e. '\n'.
+#
+# IDENTIFIER
+#   : [_a-zA-Z][_a-zA-Z0-9]*
+
+# LITERAL
+#   : 0x[0-9]*
+#   | [0-9]*
+#   | 'ASCII'
+#   | "ASCII*"
+#
 
 # Expressions only contain identifiers, literals and operators, where
 # operators include arithmetic and boolean operators, the function call
@@ -14,34 +26,34 @@ IDENTIFIER CONSTANT STRING
 
 unary_operator
 	: deref_operator
-	| '!' | '~';
+	| '!' | '~' ;
 
 deref_operator
-	: '*';
+	: '*' ;
 
 binary_operator
 	: bitwise_operator
 	| logical_operator
 	| math_operator
-	| assignment_operator;
+	| assignment_operator ;
 
 math_operator
-	: '+' | '-' | '/' | '*' | '%';
+	: '+' | '-' | '/' | '*' | '%' ;
 
 bitwise_operator
-	: '|' | '&' | '^';
+	: '|' | '&' | '^' ;
 
 logical_operator
-	: '||' | '&&' | '==' | '!=' | '<' | '>' | '<=' | '>=';
+	: '||' | '&&' | '==' | '!=' | '<' | '>' | '<=' | '>=' ;
 
 assignment_operator
-	: '=';
+	: '=' ;
 
 pointer_operator
-	: '.' | '->';
+	: '.' | '->' ;
 
 array_operator
-	: expr '[' expr ']';
+	: expr '[' expr ']' ;
 
 ########################################################################
 # Expressions
@@ -52,21 +64,21 @@ expr
 	| expr_math
 	| expr_scope
 	| IDENTIFIER
-	| LITERAL;
+	| LITERAL ;
 
 expr_scope
-	: '(' expr ')';
+	: '(' expr ')' ;
 
 expr_math
 	: expr binary_operator expr
 	| unary_operator expr
 
 parameter
-	: expr |
-	| expr ',' parameter;
+	: expr
+	| expr ',' parameter ;
 
 expr_function
-	: IDENTIFIER '(' parameter ')';
+	: IDENTIFIER '(' parameter ')' ;
 
 ########################################################################
 # Types
@@ -75,17 +87,17 @@ expr_function
 type
 	: type_base
 	| type_pointer
-	| type_struct;
+	| type_struct ;
 
 type_base
-	: 'u8' | 'u32' | 'char';
+	: 'u8' | 'u32' | 'char' ;
 
 type_struct
 	: 'struct' IDENTIFIER
 
 type_pointer
 	: type_base '*'
-	| type_struct '*';
+	| type_struct '*' ;
 
 
 ########################################################################
@@ -100,30 +112,31 @@ stmt
 	| stmt_loop
 	| stmt_flow
 	| stmt_define
-	| stmt_declare
+	| stmt_define_func
+	| stmt_declare_struct
 	| stmt_declare_initialize
-	| ';';
+	| ';' ;
 
 stmt_block
-	: '{' stmt '}';
+	: '{' stmt '}' ;
 
 stmt_multi
-	: stmt stmt;
+	: stmt stmt ;
 
 stmt_expr
 	: expr ';'
 
 stmt_conditional
 	: 'if' '(' expr ')' stmt
-	| 'if' '(' expr ')' stmt 'else' stmt;
+	| 'if' '(' expr ')' stmt 'else' stmt ;
 
 stmt_loop
 	: 'while' '(' expr ')' stmt
-	| 'for' '(' expr ';' expr ';' expr ')' stmt;
+	| 'for' '(' expr ';' expr ';' expr ')' stmt ;
 
 stmt_flow
 	: 'break' ';'
-	| 'continue' ';';
+	| 'continue' ';' ;
 
 stmt_return
 	: 'return' ';'
@@ -131,16 +144,18 @@ stmt_return
 
 argument
 	: type IDENTIFIER
-	| type IDENTIFIER ',' argument;
+	| type IDENTIFIER ',' argument ;
+
+stmt_declare_struct
+	: type_struct '{' stmt_define '}' ';' ;
+
+stmt_define_func
+	: type IDENTIFIER '(' argument ')' '{' stmt '}' ;
 
 stmt_define
-	: type_struct '{' stmt_declare '}' ';'
-	| type IDENTIFIER '(' argument ')' '{' stmt '}';
-
-stmt_declare
 	: type IDENTIFIER ';'
 	| type IDENTIFIER '[' CONSTANT ']' ';'
 
 stmt_declare_initialize
-	: type_primitive IDENTIFIER '=' expr ';';
+	: type_primitive IDENTIFIER '=' expr ';' ;
 
