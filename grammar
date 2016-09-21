@@ -71,7 +71,7 @@ expr_scope
 
 expr_math
 	: expr binary_operator expr
-	| unary_operator expr
+	| unary_operator expr ;
 
 parameter
 	: expr
@@ -93,7 +93,7 @@ type_base
 	: 'u8' | 'u32' | 'char' ;
 
 type_struct
-	: 'struct' IDENTIFIER
+	: 'struct' IDENTIFIER ;
 
 type_pointer
 	: type_base '*'
@@ -124,7 +124,7 @@ stmt_multi
 	: stmt stmt ;
 
 stmt_expr
-	: expr ';'
+	: expr ';' ;
 
 stmt_conditional
 	: 'if' '(' expr ')' stmt
@@ -140,7 +140,7 @@ stmt_flow
 
 stmt_return
 	: 'return' ';'
-	| 'return' expr ';'
+	| 'return' expr ';' ;
 
 argument
 	: type IDENTIFIER
@@ -154,8 +154,8 @@ stmt_define_func
 
 stmt_define
 	: type IDENTIFIER ';'
-	| type IDENTIFIER '[' CONSTANT ']' ';'
+	| type IDENTIFIER '[' LITERAL ']' ';' ;
 
 stmt_declare_initialize
-	: type_primitive IDENTIFIER '=' expr ';' ;
+	: type IDENTIFIER '=' expr ';' ;
 

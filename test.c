@@ -12,12 +12,12 @@ u32 inc(int *a)
 
 u32 main()
 {
-	int *a;      // Define pointer
-	int b = (1); // Define and initialize
-	int c[2];    // Define array
+	u32 *a;      // Define pointer
+	u32 b = (1); // Define and initialize
+	u32 c[2];    // Define array
 	struct bob o; // Define struct
 
-	o.a = 2;
+	o.a = 0x42;
 	if (o.a == 2) {
 		o.c = o.a * 3;
 	}

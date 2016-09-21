@@ -14,13 +14,6 @@
 #define STATE_SYMBOL_DELIM 3
 #define STATE_DONE         4
 
-typedef struct node {
-	char *token;
-
-	struct node *child;
-	uint64_t childCount;
-} node;
-
 static char *file;
 static char *grammarFile = "grammar";
 static int dumpParseTree;
@@ -103,10 +96,38 @@ parseArgs(int argc, char **argv)
 	}
 }
 
-int readLine(FILE *fp)
+#if 0
+struct Array {
+	void *elements;
+	int numElements;
+};
+
+static int
+addElement(struct Array *array, void *element, void *elementSize)
 {
-	return 0;
+	array->numElements++;
+	element = realloc(array->elements,
+					   sizeof(*array->elements) * array->numElements);
+	if (element == NULL) {
+		fprintf(stderr, "Can't allocate a new element: %s\n", strerror(errno));
+		return -1;
+	}
+	array->elements = element;
+	element = &array->elements[array->numElements - 1];
+	memset(element, 0, sizeof(*element));
 }
+
+static int
+getElement(struct Array *array, int element)
+{
+
+}
+#endif
+
+#define SYMBOL_TERMINAL   0
+#define SYMBOL_REFERENCE  1
+#define SYMBOL_LITERAL    2
+#define SYMBOL_IDENTIFIER 3
 
 struct Symbol {
 	/*
@@ -136,18 +157,26 @@ struct Rule {
 
 struct Grammar {
 	/*
-	 * For now, we will just use a linked list of rules.
+	 * For now, we will just use an array of rules.
 	 */
 	struct Rule *rules;
 	int numRules;
-};
 
-struct Grammar *gGrammar;
+	/*
+	 * Array of all terminal symbols for tokenizing.
+	 */
+	char **terminals;
+	int numTerminals;
+};
 
 static void
 dumpRule(struct Rule *rule)
 {
 	int i, j;
+
+	if ((rule == NULL) || (rule == (void *)-1)) {
+		return;
+	}
 
 	fprintf(stderr, "%s : ", rule->name);
 	for (i = 0; i < rule->numStrings; i++) {
@@ -162,56 +191,97 @@ dumpRule(struct Rule *rule)
 			if (j > 0) {
 				fprintf(stderr, " ");
 			}
-			fprintf(stderr, "%s", symbol->token);
+			if (symbol->type == SYMBOL_TERMINAL) {
+				fprintf(stderr, "'%s'", symbol->token);
+			} else {
+				fprintf(stderr, "%s", symbol->token);
+			}
 		}
 	}
 	fprintf(stderr, ";\n");
 }
 
-#if 0
 /*
- * 
+ * Delimiters   | ;
+ * Whitespace
+ * 'string'
+ * # comments
  */
+
 static int
-readToken(FILE *fp, char *token, int maxTokenLen)
+readGrammarToken(FILE *fp, char *token, int maxTokenLen)
 {
-	static char delim[] = " :;";
-	int tokenLen = 0;
+	int c;
+	int len = 0;
+	int readingString = 0;
 
 	memset(token, 0, maxTokenLen);
 
-	while ((c = fgetc(fp)) != EOF) {
-		if (tokenLen <= 0) {
-			if (c == " ") {
+	while (((c = fgetc(fp)) != EOF) && (ferror(fp) == 0)) {
+		if (readingString == 0) {
+			if (c == '\'') {
 				/*
-				 * We only break on spaces once we have a token.
+				 * Found a single quote, so this is the beginning of a string.
 				 */
-				continue;
+				readingString = 1;
 			}
-			if (c == ';' || c == '|') {
+			if ((c == ':') || (c == ';')) {
+				if (len <= 0) {
+					/*
+					 * The token is currently empty, so this char is the token.
+					 */
+					token[len] = c;
+					len++;
+					break;
+				} else {
+					/*
+					 * Found a delimiter, but it's a special one.
+					 * Seek back and break.
+					 */
+					fseek(fp, -1, SEEK_CUR);
+					break;
+				}
+			}
+			if ((c == ' ') || (c == '\n') || (c == '\t')) {
+				if (len <= 0) {
+					/*
+					 * We only break on whitespace once we have a token.
+					 */
+					continue;
+				} else {
+					/*
+					 * We have a token, so break on whitespace.
+					 */
+					break;
+				}
+			}
+			if (c == '#') {
+				while ((c = fgetc(fp)) != EOF) {
+					/*
+					 * Skip over the comment.
+					 */
+					if (c == '\n') {
+						break;
+					}
+				}
+				if (ferror(fp) != 0) {
+					break;
+				}
+				if (len <= 0) {
+					continue;
+				}
+				break;
+			}
+		} else {
+			if (c == '\'') {
 				/*
-				 * The token is currently empty, so this must be the token.
+				 * Found the end of a string.
 				 */
+				readingString = 0;
 				token[len] = c;
 				len++;
 				break;
 			}
-		}
-
-		if (c == " ") {
-			/*
-			 * Found a delimiter.
-			 */
-			break;
-		}
-
-		if ((c == ':') || (c == '|')) {
-			/*
-			 * Found a delimiter, but it's a special one.
-			 * Seek back and break.
-			 */
-			fseek(fp, -1, SEEK_CUR);
-			break;
 		}
 
 		token[len] = c;
@@ -225,7 +295,6 @@ readToken(FILE *fp, char *token, int maxTokenLen)
 
 	return len;
 }
-#endif
 
 static void
 freeRule(struct Rule *rule)
@@ -234,12 +303,48 @@ freeRule(struct Rule *rule)
 }
 
 static int
-addSymbol(struct SymbolString *string, char *token)
+indexTerminalSymbol(struct Grammar *grammar, struct Symbol *symbol)
+{
+	char **terminal;
+	int i;
+
+	for (i = 0; i < grammar->numTerminals; i++) {
+		if (strcmp(grammar->terminals[i], symbol->token) == 0) {
+			/*
+			 * This terminal symbol has already been indexed.
+			 */
+			return 0;
+		}
+	}
+
+	/*
+	 * Increase the terminal array size.
+	 */
+	grammar->numTerminals++;
+	terminal = realloc(grammar->terminals,
+					   sizeof(*grammar->terminals) * grammar->numTerminals);
+	if (terminal == NULL) {
+		fprintf(stderr, "Can't allocate a new terminal: %s\n", strerror(errno));
+		return -1;
+	}
+	grammar->terminals = terminal;
+	terminal = &grammar->terminals[grammar->numTerminals - 1];
+	memset(terminal, 0, sizeof(*terminal));
+
+	*terminal = symbol->token;
+
+	fprintf(stderr, "Indexed: %s\n", *terminal);
+
+	return 0;
+}
+
+static int
+addSymbol(struct Grammar *grammar, struct SymbolString *string, char *token)
 {
 	struct Symbol *symbol;
 
 	/*
-	 * Allocate a new SymbolString.
+	 * Increase the symbol array size.
 	 */
 	string->numSymbols++;
 	symbol = realloc(string->symbols,
@@ -255,49 +360,62 @@ addSymbol(struct SymbolString *string, char *token)
 	symbol->token = strdup(token);
 
 	if ((token[0] == '\'') &&
-		(token[strlen(token)] == '\'')) {
+		(token[strlen(token) - 1] == '\'')) {
 		/*
 		 * This is a terminal symbol.
 		 */
-		symbol->type = 0;
-		symbol->value = strdup(token);
+		symbol->type = SYMBOL_TERMINAL;
+
+		/*
+		 * Remove quotes.
+		 */
+		int i;
+		token[strlen(token) - 1] = '\0';
+		for (i = 0; token[i] != '\0'; i++) {
+			token[i] = token[i + 1];
+		}
+		free(symbol->token);
+		symbol->token = strdup(token);
+
+		if (indexTerminalSymbol(grammar, symbol) < 0) {
+			fprintf(stderr, "Error: Can't index terminal symbol: %s\n", symbol->token);
+			free(symbol);
+			return -1;
+		}
+	} else if (strcmp(token, "IDENTIFIER") == 0) {
+		symbol->type = SYMBOL_IDENTIFIER;
+	} else if (strcmp(token, "LITERAL") == 0) {
+		symbol->type = SYMBOL_LITERAL;
 	} else {
 		/*
 		 * This is a non-terminal symbol.
-		 * TODO: Lookup reference.
 		 */
-		symbol->type = 1;
-		symbol->value = NULL;
+		symbol->type = SYMBOL_REFERENCE;
 	}
-
-	//TODO: Special terminal symbols (IDENTIFIER, LITERAL)
 
 	return 0;
 }
 
 static struct Rule *
-readRule(FILE *fp)
+readRule(FILE *fp, struct Grammar *grammar, struct Rule *rule)
 {
 	char token[4096];
 	int len;
-	struct Rule *rule;
 	struct SymbolString *string = NULL;
 	int state;
 
-	if ((rule = malloc(sizeof(*rule))) == NULL) {
-		fprintf(stderr, "Can't allocate new rule: %s\n", strerror(errno));
+	if (rule == NULL) {
+		fprintf(stderr, "Error: Rule struct is NULL.\n");
 		return (void *)-1;
 	}
 	memset(rule, 0, sizeof(*rule));
-
-	//TODO: Skip comment lines.
 
 	/*
 	 * Simple state machine to parse rules.
 	 */
 	state = STATE_NAME;
-	while ((len = fscanf(fp, "%s", token)) > 0) {
-		fprintf(stderr, "Token: %s\n", token);
+	while ((len = readGrammarToken(fp, token, sizeof(token))) > 0) {
+		//fprintf(stderr, "Token: %s\n", token);
 		if (state == STATE_NAME) {
 			if ((strcmp(token, "|") == 0) ||
 				(strcmp(token, ";") == 0)) {
@@ -325,15 +443,19 @@ readRule(FILE *fp)
 				/*
 				 * Found end of rule.
 				 */
-				state = STATE_DONE;
+				state = STATE_NAME;
 				break;
 			}
+
 			if (strcmp(token, "|") == 0) {
-				if (string == NULL) {
-					fprintf(stderr, "Expected symbol string before '|'\n");
-					break;
+				/*
+				 * Delimiter separating two strings of symbols.
+				 * Start a new SymbolString.
+				 */
+				if (string != NULL) {
+					string = NULL;
 				}
-				string = NULL;
+				continue;
 			}
 
 			if (string == NULL) {
@@ -352,7 +474,7 @@ readRule(FILE *fp)
 				memset(string, 0, sizeof(*string));
 			}
 
-			if (addSymbol(string, token) < 0) {
+			if (addSymbol(grammar, string, token) < 0) {
 				fprintf(stderr, "Can't add symbol '%s' to symbol string.\n", token);
 				break;
 			}
@@ -362,40 +484,411 @@ readRule(FILE *fp)
 		fprintf(stderr, "Unknown state?!\n");
 	}
 
-	if (state != STATE_DONE) {
+	if (state != STATE_NAME) {
 		fprintf(stderr, "Failed to read rule.\n");
 		freeRule(rule);
 		return (void *)-1;
 	}
 
+	if (len <= 0) {
+		return NULL;
+	}
+
 	return rule;
 }
 
-static int
+static struct Rule *
+findRuleByName(struct Grammar *grammar, char *name)
+{
+	struct Rule *rule;
+	int i;
+
+	for (i = 0; i < grammar->numRules; i++) {
+		rule = &grammar->rules[i];
+		if (strcmp(rule->name, name) == 0) {
+			/*
+			 * Found a match.
+			 */
+			return rule;
+		}
+	}
+
+	return NULL;
+}
+
+static struct Grammar *
 loadGrammar(char *path)
 {
 	FILE	*fp;
+	struct Grammar *grammar;
 	struct Rule *rule;
+
+	if ((fp = fopen(path, "r")) == NULL) {
+		fprintf(stderr, "Can't open %s: %s\n", path, strerror(errno));
+		return NULL;
+	}
+
+	if ((grammar = malloc(sizeof(*grammar))) == NULL) {
+		fprintf(stderr, "Can't allocate new grammar: %s\n", strerror(errno));
+		fclose(fp);
+		return NULL;
+	}
+	memset(grammar, 0, sizeof(*grammar));
+
+	while (1) {
+		/*
+		 * Increase the rule array size.
+		 */
+		grammar->numRules++;
+		rule = realloc(grammar->rules,
+					   sizeof(*grammar->rules) * grammar->numRules);
+		if (rule == NULL) {
+			fprintf(stderr, "Can't allocate a new rule: %s\n", strerror(errno));
+			return NULL;
+		}
+		grammar->rules = rule;
+		rule = &grammar->rules[grammar->numRules - 1];
+		memset(rule, 0, sizeof(*rule));
+
+		rule = readRule(fp, grammar, rule);
+		if ((rule == NULL) || (rule == (void *)-1)) {
+			grammar->numRules--;
+			break;
+		}
+
+		//dumpRule(rule);
+	}
+
+	/*
+	 * Link all rule references.
+	 */
+	int i, j, k;
+	for (i = 0; i < grammar->numRules; i++) {
+		rule = &grammar->rules[i];
+		dumpRule(rule);
+		for (j = 0; j < rule->numStrings; j++) {
+			struct SymbolString *string = &rule->strings[j];
+			for (k = 0; k < string->numSymbols; k++) {
+				struct Symbol *symbol = &string->symbols[k];
+				if (symbol->type == SYMBOL_REFERENCE) {
+					struct Rule *ref = findRuleByName(grammar, symbol->token);
+					if (ref == NULL) {
+						fprintf(stderr, "Error: Reference to undefined rule %s\n", symbol->token);
+						return NULL;
+					}
+					symbol->value = ref;
+				}
+			}
+		}
+	}
+
+	fclose(fp);
+	return grammar;
+}
+
+static int
+isAlpha(char c)
+{
+	if (((c >= 0x41) && (c <= 0x5A)) ||
+		((c >= 0x61) && (c <= 0x7A))) {
+		return 1;
+	}
+	return 0;
+}
+
+static int
+isNum(char c)
+{
+	if ((c >= 0x30) && (c <= 0x39)) {
+		return 1;
+	}
+	return 0;
+}
+
+static int
+isIdentifier(char *token)
+{
+	int i;
+
+	if ((token[0] != '_') && !isAlpha(token[0])) {
+		return 0;
+	}
+	for (i = 1; token[i] != '\0'; i++) {
+		if ((token[i] != '_') && !isAlpha(token[i]) && !isNum(token[i])) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int
+isHex(char c)
+{
+	if ((((c >= 0x41) && (c <= 0x46)) ||
+		 ((c >= 0x61) && (c <= 0x66))) ||
+		(isNum(c) != 0)) {
+		return 1;
+	}
+	return 0;
+}
+
+static int
+isLiteralHex(char *token)
+{
+	int i;
+
+	if (strncmp(token, "0x", 2) != 0) {
+		return 0;
+	}
+	for (i = 2; token[i] != '\0'; i++) {
+		if (isHex(token[i]) == 0) {
+			return 0;
+		}
+	}
+	if (i > 2) {
+		return 1;
+	}
+	return 2;
+}
+
+static int
+isLiteralDec(char *token)
+{
+	int i;
+
+	for (i = 0; token[i] != '\0'; i++) {
+		if (isNum(token[i]) == 0) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * 0  Not a literal.
+ * 1  A literal.
+ * 2  An incomplete literal.
+ */
+static int
+isLiteral(char *token)
+{
+	int len = strlen(token);
+	int ret = 0;
+
+	if (len == 0) {
+		return 0;
+	}
+
+	/*
+	 * Numeric literal.
+	 */
+	if ((ret = isLiteralHex(token)) != 0) {
+		return ret;
+	}
+	if (isLiteralDec(token) != 0) {
+		return 1;
+	}
+
+#if 0
+	/*
+	 * String literal.
+	 */
+	if (token[0] == '"') {
+		for (i = 0; token[i] != '\0'; i++) {
+			if (token[i] == '"') {
+				count++;
+			}
+		}
+		if (count == 1) {
+			return 2;
+		}
+		if (count == 2) {
+			return 1;
+		}
+		return 0;
+	}
+
+	/*
+	 * Character literal.
+	 */
+	if (token[0] == '\'') {
+		for (i = 0; token[i] != '\0'; i++) {
+			
+		}
+	}
+#endif
+
+	return 0;
+}
+
+static int
+readSourceUntil(FILE *fp, char *sentinel)
+{
+	int c, i;
+	char token[4096];
+	int len = 0;
+	int sentinelLen = strlen(sentinel);
+
+	memset(token, 0, sizeof(token));
+	while (((c = fgetc(fp)) != EOF) && (ferror(fp) == 0)) {
+		if (len == sentinelLen) {
+			/*
+			 * Shift characters left one place.
+			 */
+			for (i = 0; i < sentinelLen; i++) {
+				token[i] = token[i + 1];
+			}
+			len--;
+		}
+		token[len] = c;
+		len++;
+		if (strcmp(token, sentinel) == 0) {
+			return 0;
+		}
+	}
+
+	return -1;
+}
+
+static char *
+readSourceToken(FILE *fp, struct Grammar *grammar)
+{
+	int c, i;
+	char token[4096];
+	int len = 0;
+	int partialMatch = 0;
+
+	memset(token, 0, sizeof(token));
+
+	while (((c = fgetc(fp)) != EOF) && (ferror(fp) == 0)) {
+		if ((c == ' ') || (c == '\n') || (c == '\t')) {
+			/*
+			 * White space is always a delimiter.
+			 */
+			if (partialMatch == 0) {
+				if (len == 0) {
+					continue;
+				}
+				break;
+			}
+		}
+
+		/*
+		 * Add the char to the token before we know if it will match.
+		 * If it causes a mismatch, we will remove it.
+		 */
+		token[len] = c;
+		len++;
+
+		if (strcmp(token, "/*") == 0) {
+			/*
+			 * Skip over multiline comment.
+			 */
+			if (readSourceUntil(fp, "*/") < 0) {
+				fprintf(stderr, "Error: Failed to read until '*/'\n");
+				return NULL;
+			}
+			len = 0;
+			memset(token, 0, sizeof(token));
+			continue;
+		}
+		if (strcmp(token, "//") == 0) {
+			/*
+			 * Skip over single line comment.
+			 */
+			if (readSourceUntil(fp, "\n") < 0) {
+				fprintf(stderr, "Error: Failed to read until '\\n'\n");
+				return NULL;
+			}
+			len = 0;
+			memset(token, 0, sizeof(token));
+			continue;
+		}
+
+		/*
+		 * Find longest matching terminal.
+		 */
+		for (i = 0; i < grammar->numTerminals; i++) {
+			if (strcmp(grammar->terminals[i], token) == 0) {
+				//fprintf(stderr, "Match: (%s) -> %s\n", grammar->terminals[i], token);
+				break;
+			}
+		}
+		if (i < grammar->numTerminals) {
+			continue;
+		}
+
+		if (isIdentifier(token) != 0) {
+			//fprintf(stderr, "Match ident: %s\n", token);
+			continue;
+		}
+
+		i = isLiteral(token);
+		if (i != 0) {
+			partialMatch = 0;
+			if (i == 2) {
+				partialMatch = 1;
+			}
+			continue;
+		}
+
+		/*
+		 * We didn't find a match. Remove the last char.
+		 * Seek back and break.
+		 */
+		fseek(fp, -1, SEEK_CUR);
+		len--;
+		token[len] = '\0';
+		break;
+	}
+
+	if (partialMatch != 0) {
+		fprintf(stderr, "Error: Incomplete match: %s\n", token);
+		return (char *)-1;
+	}
+	if (ferror(fp) != 0) {
+		fprintf(stderr, "File error.\n");
+		return (char *)-1;
+	}
+	if (len == 0) {
+		if (feof(fp) != 0) {
+			return NULL;
+		}
+		fprintf(stderr, "Error: Failed to match next token.\n");
+		return (char *)-1;
+	}
+
+	return strdup(token);
+}
+
+static int
+parseSourceFile(char *path, struct Grammar *grammar)
+{
+	FILE *fp;
+	char *token;
 
 	if ((fp = fopen(path, "r")) == NULL) {
 		fprintf(stderr, "Can't open %s: %s\n", path, strerror(errno));
 		return -1;
 	}
 
-	while (((rule = readRule(fp)) != NULL) && (rule != (void *)-1)) {
-		dumpRule(rule);
+
+	while (((token = readSourceToken(fp, grammar)) != NULL) &&
+		   (token != (char *)-1)) {
+		fprintf(stderr, "Token: %s\n", token);
 	}
 
-	fclose(fp);
 	return 0;
 }
 
 int main(int argc, char **argv)
 {
+	struct Grammar *grammar;
+
 	parseArgs(argc, argv);
 
-	loadGrammar(grammarFile);
-	//parseSourceFile(file);
+	grammar = loadGrammar(grammarFile);
+	parseSourceFile(file, grammar);
 
 	return 0;
 }
