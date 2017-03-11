@@ -18,8 +18,8 @@ objects.
 +-------------+
 
 The super block contains a size field to indicates the total size of
-the heap. There are offsets to the used and free lists which are
-discussed more below.
+the heap (including the super block size). There are offsets to the
+used and free lists which are discussed more below.
 
 struct superBlock {
 	uint32_t size;

@@ -118,7 +118,7 @@ export .malloc
 
 	cmp r3 0
 	jz .__l_malloc_nonext
-		add r4 r3 8
+		add r4 r3 4
 		stw @r4 r2 ; next.prevOffset = this.prevOffset
 	.__l_malloc_nonext
 
@@ -180,13 +180,20 @@ export .malloc
 		;
 		; Update "this" object's size.
 		;
-		or r2 r0 0x80000000 ; Set the 32nd bit to indicate it is used.
-		stw @r1 r2          ; this.size = requestedSize
+		stw @r1 r0
 
 	;
 	; Attach this object to used list.
 	;
 	.__l_malloc_attach
+
+	;
+	; Mark the object as used by setting the 32nd bit.
+	;
+	ldw r2 @r1          ; this.length
+	or r2 r2 0x80000000 ; Set the 32nd bit to indicate it is used.
+	stw @r1 r2          ; this.size = requestedSize
+	
 	add r2 r1 4
 	stw @r2 0   ; this.prevOffset = 0
 

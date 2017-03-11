@@ -199,7 +199,7 @@ void printHeapObject(struct heapHeader *header, struct heapTrailer *trailer)
 
 	fprintf(stderr, "  Trailer at 0x%" PRIX32 "\n", (uint32_t)(((void *)trailer) - mapping));
 	fprintf(stderr, "    headerOffset: 0x%" PRIX32 "%s\n", trailer->headerOffset,
-			headerOffset != trailer->headerOffset ? C_RED " Incorrect!" : "");
+			headerOffset != trailer->headerOffset ? C_RED " Incorrect!" C_NO : "");
 }
 
 int scanHeap()
