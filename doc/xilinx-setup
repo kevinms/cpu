@@ -1,0 +1,8 @@
+Create an account on Xilinx website.
+Install the Xilinx ISE WebPACK (Linux or Windows).
+Extract the tar and run: sudo ./xsetup
+Select the ISE WebPACK.
+Setup environment variables with: . /opt/Xilinx/14.7/ISE_DS/settings64.sh
+Run: ise
+Go to www.xilinx.com\getlicense and generate a free ISE WebPACK license.
+Download the xilinx.lic file and load it using the license manager.
