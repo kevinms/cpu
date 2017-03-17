@@ -6,3 +6,12 @@ Setup environment variables with: . /opt/Xilinx/14.7/ISE_DS/settings64.sh
 Run: ise
 Go to www.xilinx.com\getlicense and generate a free ISE WebPACK license.
 Download the xilinx.lic file and load it using the license manager.
+
+Setup papilio loader:
+sudo apt-get install libftdi1:i386 # Need the 32bit libftdi1
+Program using: papilio-loader-gui # Run the gui loader
+
+Follow the tutorial at: http://papilio.cc/index.php?n=Papilio.GettingStarted
+Hook up scope to even pins and see square wave.
+Use screen to see serial output over USB: screen /dev/serial/by-id/usb-FTDI_Dual_RS232-if01-port0
+
