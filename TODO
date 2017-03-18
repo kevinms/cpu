@@ -25,6 +25,8 @@ DONE - Determine sane offsets/sizes for the memory layout. I.e. placement and
 DONE - Figure out how conditional branches and the flags register will work.
 
 WIP - Implement malloc and free in the standard library.
+		+ Need to implement coalescing with neighbors in free().
+		+ Write a set of unit tests to excerise malloc() and free().
 
 Debugger Improvements
  DONE + Render bottom of file centered on screen better.
