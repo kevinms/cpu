@@ -31,6 +31,8 @@ Debugger Improvements
  + Run command files for frequently executed commands.
 
 WIP - Implement malloc and free in the standard library.
+	+ Need to implement coalescing with neighbors in free().
+	+ Write a set of unit tests to excerise malloc() and free().
 
 WIP - Kernel should use malloc and free to spawn new tasks.
 
