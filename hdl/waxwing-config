@@ -1,0 +1,35 @@
+Download the open source loader:
+
+	git clone https://github.com/amilkovich/numato-loader.git
+	cd numato-loader
+
+Edit the 'numato-loader.c' and change the DESCRIPTION macro to:
+
+	#define DESCRIPTION "Waxwing Spartan 6 FPGA Board"
+
+Alternatively, just get this fork with all the changes made:
+	https://github.com/modernrio/saturn-loader.git
+
+Build the loader:
+
+	make
+	./numato-loader -l
+
+Create a new project in WebPACK ISE with these properties:
+
+	Family Spartan6
+	Device XC6SLX45
+	Package CSG324
+	Speed -2
+
+Add a new verilog module and right click on the "Generate Programming File" process.
+Click on "Process Properties" and check the "Create Binary Configuration File" option.
+This will produce a .bin file in addition to the usual .bit file. The .bin file
+is what you use to program the chip.
+
+You can determine the speed rating based on the package marking.
+Read the fine print on the FPGA IC itself and reference this document:
+
+	https://www.xilinx.com/support/documentation/user_guides/ug385.pdf
+
+
