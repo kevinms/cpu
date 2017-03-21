@@ -7,7 +7,7 @@
 
 .kernel 0x0
 .stdlib 0x3000
-.bios	0x4000
+.boot	0x4000
 .tmp_sd 0x5000
 
 .sd_kernel_data 0x60
@@ -17,7 +17,7 @@
 .fs_overhead		0x54
 
 ; initialize the stack
-mov ba .bios
+mov ba .boot
 mov sp 0x1000
 
 ;

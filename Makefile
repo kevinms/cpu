@@ -11,7 +11,7 @@ all:
 debug:
 	gcc -Wall -g -pg emulator.c debugger.c -lncurses -o emulator
 
-os: bios lib kernel
+os: boot lib kernel
 	echo "Building full OS stack."
 	rm -f sd.img
 	./fs -i sd.img -n4096
@@ -19,8 +19,8 @@ os: bios lib kernel
 	./fs -i sd.img -a progs/lib.bin
 	./fs -i sd.img -l
 
-bios:
-	./assembler.py -a progs/bios.asm --binary --debug > progs/bios.rom
+boot:
+	./assembler.py -a progs/boot.asm --binary --debug > progs/boot.rom
 
 lib:
 	./assembler.py -a progs/lib.asm --binary --debug --symbols -s 0x3000 > progs/lib.rom

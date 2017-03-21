@@ -24,17 +24,24 @@ DONE - Determine sane offsets/sizes for the memory layout. I.e. placement and
 
 DONE - Figure out how conditional branches and the flags register will work.
 
-WIP - Implement malloc and free in the standard library.
-
 Debugger Improvements
  DONE + Render bottom of file centered on screen better.
  + Load label symbols for easier liner breakpoints.
  + Tab completion in the shell.
  + Run command files for frequently executed commands.
 
-Implement the FS library and possibly use it in the BIOS.
+WIP - Implement malloc and free in the standard library.
+	+ Need to implement coalescing with neighbors in free().
+	+ Write a set of unit tests to excerise malloc() and free().
 
 WIP - Kernel should use malloc and free to spawn new tasks.
+
+Three major decisions need to be made:
+	+ Word vs. byte addressable memory?
+	+ Memory mapped IO vs. IO Registers to interface with timers / SPI?
+	+ Signed arithmetic and signed relative jumps?
+
+Implement the FS library and possibly use it in the "boot" loader.
 
 Finish interrupt implementation in the emulator and add a task switcher
 interrupt handler to the kernel.
