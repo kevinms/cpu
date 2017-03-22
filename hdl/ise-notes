@@ -1,0 +1,36 @@
+#
+# Creating and configuring a block memory.
+#
+
+Create a new project.
+Make sure you are in the "Implementation" view.
+Click the "New Source" icon.
+Select IP (CORE Generator & Architexture Wizard).
+Enter a file name.
+Search for "block".
+Select "Block Memory Generator".
+
+#
+# Preload block memory.
+#
+
+Create a .coe file in the following format:
+https://www.xilinx.com/support/documentation/sw_manuals/xilinx11/cgn_r_coe_file_syntax.htm
+
+#
+# Create a test bench and simulate.
+#
+
+Click "the New Source" icon.
+Select "Verilog Test Fixture".
+Enter a file name.
+Select which project you want to test.
+Switch to the "Simulation" view.
+Click on the new test fixture file.
+Make sure the clock is being generated:
+
+	always
+		#5 clka = !clka;
+
+Click on "Behavioral Check Syntax" in the process list.
+Click on "Simulate Behavioral Model" in the process list.

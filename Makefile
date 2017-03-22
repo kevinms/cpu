@@ -21,6 +21,7 @@ os: boot lib kernel
 
 boot:
 	./assembler.py -a progs/boot.asm --binary --debug > progs/boot.rom
+	./bin2coe.sh -w 1 progs/boot.bin > progs/boot.coe
 
 lib:
 	./assembler.py -a progs/lib.asm --binary --debug --symbols -s 0x3000 > progs/lib.rom
