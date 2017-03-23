@@ -241,7 +241,8 @@ module waxwing_test1(
 					I_DIE : state <= STATE_HALT;
 				endcase
 				
-				state <= STATE_FETCH;
+				if (opcode != I_DIE)
+					state <= STATE_FETCH;
 			end
 		endcase
 		
