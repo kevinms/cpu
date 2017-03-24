@@ -23,6 +23,7 @@ module waxwing_test1(
 	// Inputs
 	reg [0:0] wea;
 	reg [7:0] dina;
+	reg [15:0] addr = 0;
 
 	// Outputs
 	wire [7:0] douta;
@@ -31,7 +32,7 @@ module waxwing_test1(
 	bram uut (
 		.clka(Clk), 
 		.wea(wea), 
-		.addra(PC[15:0]), 
+		.addra(addr), 
 		.dina(dina), 
 		.douta(douta)
 	);
@@ -108,10 +109,10 @@ module waxwing_test1(
 	parameter I_MUL = 8'b00000101;
 	parameter I_DIV = 8'b00000110;
 	
-	parameter I_LDB = 8'b00000111;
-	parameter I_LDW = 8'b00001000;
-	parameter I_STB = 8'b00001001;
-	parameter I_STW = 8'b00001010;
+	parameter I_LDW = 8'b00000111;
+	parameter I_LDB = 8'b00001000;
+	parameter I_STW = 8'b00001001;
+	parameter I_STB = 8'b00001010;
 	
 	parameter I_MOV = 8'b00001011;
 	
@@ -134,7 +135,7 @@ module waxwing_test1(
 	/*
 	 * Decoded operands.
 	 */
-	 reg [31:0] opr0, opr1, opr2, jmp_addr;
+	 reg [31:0] opr0, opr1, opr2, jmp_addr, pc_addr;
 
 	/*
 	 * CPU state machine.
@@ -146,23 +147,23 @@ module waxwing_test1(
 	parameter STATE_HALT = 3'h4;
 	
 	reg [2:0] state = STATE_RESET;
-	
 	reg [3:0] bytes_left = 8;
 	
 	always @(posedge enable) begin
 		case (state)
 			STATE_RESET : begin
 				PC <= 0;
+				addr <= 0;
 				bytes_left <= 8;
 				state <= STATE_FETCH;
 			end
 			
 			STATE_FETCH : begin
-				inst[bytes_left - 1] <= douta;
-				PC <= PC + 1;
+				inst[bytes_left - 4'b1] <= douta;
+				//PC <= PC + 1;
+				addr <= addr[15:0] + 16'b1;
 				bytes_left <= bytes_left - 4'b1;
 				if (bytes_left == 1) begin
-					bytes_left <= 8;
 					state <= STATE_DECODE;
 				end
 			end
@@ -170,11 +171,29 @@ module waxwing_test1(
 			STATE_DECODE : begin
 				opr0 <= r[reg0[3:0]];
 				opr1 <= r[reg1[3:0]];
-				if (mode[0])
-					opr2 <= r[raw2[3:0]];
-				else
-					opr2 <= raw2;
+				opr2 <= mode[1] ? r[raw2[3:0]] : raw2;
+				
+				/*
+				 * Set jmp_addr early in case this is a jump opcode.
+				 */
 				jmp_addr <= (mode[1] == 0) ? r[R_BA] + raw2 : raw2;
+				
+				/*
+				 * Setup memory access early for load / store.
+				 */
+				if (opcode == I_STB || opcode == I_STW ||
+					 opcode == I_LDB || opcode == I_LDW) begin
+					pc_addr <= addr;
+					addr <= (mode[1] ? r[raw2[3:0]] : raw2);
+				end
+				if (opcode == I_LDW || opcode == I_STW) begin
+					bytes_left <= 4'h4;
+				end
+				if (opcode == I_STB || opcode == I_STW) begin
+					wea <= 1'b1;
+					dina <= r[reg0[3:0]];
+				end
+				
 				state <= STATE_EXECUTE;
 			end
 			
@@ -195,10 +214,30 @@ module waxwing_test1(
 					I_DIV : r[reg0] <= opr1 / opr2;
 					
 					/*
-					 * Loads and stores.
+					 * Moving data around.
 					 */
 					I_MOV : r[reg0] <= opr2;
+					I_LDB : r[reg0][7:0] <= douta;
+					I_LDW : begin
+						case (bytes_left)
+							4'h4 : r[reg0][31:24] <= douta;
+							4'h3 : r[reg0][23:16] <= douta;
+							4'h2 : r[reg0][15:8] <= douta;
+							4'h1 : r[reg0][7:0] <= douta;
+						endcase
+						addr <= addr[15:0] + 16'b1;
+						bytes_left <= bytes_left - 4'b1;
+					end
 					
+					I_STB : begin
+						//dina <= r[reg0[3:0]];
+						//addr <= (mode[1] ? r[raw2[3:0]] : raw2);
+						//wea <= 1'b1;
+					end
+					I_STW : begin
+					
+					end
+
 					/*
 					 * Bitwise operations.
 					 */
@@ -206,8 +245,8 @@ module waxwing_test1(
 					I_OR : r[reg0] <= opr1 | opr2;
 					I_XOR : r[reg0] <= opr1 ^ opr2;
 					I_NOR : r[reg0] <= ~opr1 & ~opr2;
-					I_LSL : r[reg0] <= {opr1[30:0], 1'b0};
-					I_LSR : r[reg0] <= {1'b0, opr1[31:1]};
+					I_LSL : r[reg0] <= opr1 << opr2;
+					I_LSR : r[reg0] <= opr1 >> opr2;
 					
 					/*
 					 * Branches and jumps.
@@ -217,22 +256,22 @@ module waxwing_test1(
 						r[R_FL][FL_C] <= r[reg0] < opr2;
 					end
 					
-					I_JMP : PC <= jmp_addr;
+					I_JMP : addr <= jmp_addr;
 					I_JZ : begin
 						if (r[R_FL][FL_Z] != 0)
-							PC <= jmp_addr;
+							addr <= jmp_addr;
 					end
 					I_JNZ : begin
 						if (r[R_FL][FL_Z] == 0)
-								PC <= jmp_addr;
+								addr <= jmp_addr;
 					end
 					I_JL : begin
 						if (r[R_FL][FL_C] != 0)
-								PC <= jmp_addr;
+								addr <= jmp_addr;
 					end
 					I_JGE : begin
 						if ((r[R_FL][FL_C] == 0) || (r[R_FL][FL_Z] != 0))
-								PC <= jmp_addr;
+								addr <= jmp_addr;
 					end
 					
 					/*
@@ -241,16 +280,31 @@ module waxwing_test1(
 					I_DIE : state <= STATE_HALT;
 				endcase
 				
-				if (opcode != I_DIE)
+				/*
+				 * Transition to STATE_FETCH except when:
+				 *   1. Opcode is I_DIE
+				 *   2. Multibyte load or store
+				 */
+				if (opcode != I_DIE && bytes_left < 2) begin
+					if (opcode == I_STB || opcode == I_STW ||
+						 opcode == I_LDB || opcode == I_LDW) begin
+						/*
+						 * Load and store instructions overwrite the addr,
+						 * set it back to the PC.
+						 */
+						addr <= pc_addr;
+					end
 					state <= STATE_FETCH;
+					bytes_left <= 8;
+				end
 			end
 		endcase
 		
 		/*
 		 * Press and hold a switch to reset.
 		 */
-		if (!Switch[0])
-			state <= STATE_RESET;
+		//if (!Switch[0])
+		//	state <= STATE_RESET;
 	end
 
 endmodule
