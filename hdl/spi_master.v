@@ -15,7 +15,7 @@ module spi_master(
 	input            clk,
 	input            reset,
 	input            write,
-	output reg       busy,
+	output           busy,
 	input      [7:0] din,
 	output reg [7:0] dout,
 	
@@ -34,18 +34,22 @@ module spi_master(
 	input cpha
 );
 
+	initial begin
+		mosi = 0;
+	end
+
 	reg [7:0] din_reg;
-	reg [2:0] count;
+	reg [3:0] count = 8;
 	
 	/*
 	 * Shift data in and out on SCK edge.
 	 */
 	always @(negedge sck) begin
-		mosi <= dout[7];
-		dout <= {dout[6:0], dout[7]};
+		mosi <= din_reg[7];
+		din_reg <= {din_reg[6:0], din_reg[7]};
 	end
 	always @(posedge sck) begin
-		din_reg <= {din_reg[6:0], miso};
+		dout <= {dout[6:0], miso};
 	end
 	
 	/*
@@ -55,29 +59,39 @@ module spi_master(
 		Reset = 2'h0,
 		Idle = 2'h1,
 		Busy = 2'h2;
-	reg [1:0] state;
+	reg [1:0] state = Reset;
+	
+	assign busy = (state == Busy);
 	
 	always @(posedge clk) begin
 		case (state)
 			Reset : begin
 				sck <= cpol;
-				busy <= 1'b0;
 				count <= 8;
+				dout <= 0;
+				mosi <= 0;
+				state <= Idle;
 			end
 			
 			Idle : begin
 				if (write) begin
-					busy <= 1'b1;
+					din_reg <= {din[6:0], din[7]};
 					state <= Busy;
-					din_reg <= din;
+					mosi <= din[7];
+				end
+				if (reset) begin
+					state <= Reset;
 				end
 			end
 			
 			Busy : begin
-				if (count) begin
-					sck <= ~sck;
-				end else begin
-					busy <= 1'b0;
+				sck <= ~sck;
+				if (sck) begin
+					count <= count - 1;
+				end
+				if (count == 0) begin
+					sck <= cpol;
+					count <= 8;
 					state <= Idle;
 				end
 			end
@@ -85,3 +99,4 @@ module spi_master(
 	end
 
 endmodule
+
