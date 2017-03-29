@@ -5,6 +5,8 @@
 *.img
 *.memory
 *.debug
+*.coe
+*.out
 emulator
 fs
 heap
