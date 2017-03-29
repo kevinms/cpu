@@ -358,7 +358,7 @@ static void interactive()
 	updateTUI(&cpu, &o);
 }
 
-#if 1
+#if 0
 struct SPI {
 	uint8_t tx, rx;
 };

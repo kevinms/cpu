@@ -171,7 +171,7 @@ module waxwing_test1(
 			STATE_DECODE : begin
 				opr0 <= r[reg0[3:0]];
 				opr1 <= r[reg1[3:0]];
-				opr2 <= mode[1] ? r[raw2[3:0]] : raw2;
+				opr2 <= mode[0] ? r[raw2[3:0]] : raw2;
 				
 				/*
 				 * Set jmp_addr early in case this is a jump opcode.
@@ -181,17 +181,22 @@ module waxwing_test1(
 				/*
 				 * Setup memory access early for load / store.
 				 */
-				if (opcode == I_STB || opcode == I_STW ||
-					 opcode == I_LDB || opcode == I_LDW) begin
+				if (opcode == I_LDB || opcode == I_LDW) begin
 					pc_addr <= addr;
-					addr <= (mode[1] ? r[raw2[3:0]] : raw2);
+					addr <= (mode[1] == 0) ?
+						(mode[0] ? r[raw2[3:0]] : raw2) + r[R_BA] :
+						(mode[0] ? r[raw2[3:0]] : raw2);
+				end
+				if (opcode == I_STB || opcode == I_STW) begin
+					pc_addr <= addr;
+					addr <= (mode[1] == 0) ?
+						r[reg0[3:0]] + r[R_BA] :
+						r[reg0[3:0]];
+					dina <= mode[0] ? r[raw2[3:0]] : raw2;
+					wea <= 1'b1;
 				end
 				if (opcode == I_LDW || opcode == I_STW) begin
 					bytes_left <= 4'h4;
-				end
-				if (opcode == I_STB || opcode == I_STW) begin
-					wea <= 1'b1;
-					dina <= r[reg0[3:0]];
 				end
 				
 				state <= STATE_EXECUTE;
@@ -230,12 +235,19 @@ module waxwing_test1(
 					end
 					
 					I_STB : begin
-						//dina <= r[reg0[3:0]];
-						//addr <= (mode[1] ? r[raw2[3:0]] : raw2);
-						//wea <= 1'b1;
+						/*
+						 * I_STB takes place in the decode state.
+						 * The execute state is just to clock out the data.
+						 */
 					end
 					I_STW : begin
-					
+						case (bytes_left)
+							4'h4 : dina <= opr2[15:8];
+							4'h3 : dina <= opr2[23:16];
+							4'h2 : dina <= opr2[31:24];
+						endcase
+						addr <= addr[15:0] + 16'b1;
+						bytes_left <= bytes_left - 4'b1;
 					end
 
 					/*
@@ -293,6 +305,7 @@ module waxwing_test1(
 						 * set it back to the PC.
 						 */
 						addr <= pc_addr;
+						wea <= 1'b0;
 					end
 					state <= STATE_FETCH;
 					bytes_left <= 8;
