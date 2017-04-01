@@ -750,10 +750,10 @@ int main(int argc, char **argv)
 		 */
 		case cmp:
 			log("cmp r[%" PRIu32 "] %" PRIX32, o.reg0, o.opr2);
-			uint32_t temp = cpu.r[o.reg0] - o.opr2;
+			uint32_t temp = o.opr0 - o.opr2;
 			// cpu.flags->n = temp & (0x1 << 31); // enable when signed arithmetic is supported
 			cpu.flags->z = (temp == 0) ? 1 : 0;
-			cpu.flags->c = cpu.r[o.reg0] < o.opr2; // borrow?
+			cpu.flags->c = o.opr0 < o.opr2; // borrow?
 			break;
 		case jmp:
 			address = getAddress(o.mode, o.opr2);

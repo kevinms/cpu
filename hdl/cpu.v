@@ -6,23 +6,34 @@ module waxwing_test1(
 	output reg [7:0]LED
 );
 
-	reg [24:0]count = 0;
-	reg enable = 0;
-
 	initial begin
 		LED = 8'h01;
 	end
+	
+	localparam d = 0;
+	always @(posedge enable) begin
+		//LED <= {r[d][0],r[d][1],r[d][2],r[d][3],r[d][4],r[d][5],r[d][6],r[d][7]};
+		LED <= {
+			mmap_reg[d][0],mmap_reg[d][1],mmap_reg[d][2],mmap_reg[d][3],
+			mmap_reg[d][4],mmap_reg[d][5],mmap_reg[d][6],mmap_reg[d][7]};
+	end
   
-	// Scale down the clock so that output is easily visible.
+	/*
+	 * Create a signal called enable with double the period of Clk.
+	 * Clk is used for bram. 'enable' is used for the instruction
+	 * FSM. This will allow the bram unit to get values set between
+	 * instruction states. E.g. we set an address in STATE_DECODE
+	 * and by the time STATE_EXECUTE starts the bram module has
+	 * already used the address for either a read or write.
+	 */
+	reg enable = 0;
 	always @(posedge Clk) begin
-		count <= count+1'b1;
-		//enable <= count[24];
-		enable <= count[1];
+		enable <= ~enable;
 	end
 
 	// Inputs
-	reg [0:0] wea;
-	reg [7:0] dina;
+	reg [0:0] wea = 0;
+	reg [7:0] dina = 0;
 	reg [15:0] addr = 0;
 
 	// Outputs
@@ -36,23 +47,51 @@ module waxwing_test1(
 		.dina(dina), 
 		.douta(douta)
 	);
+	/*
+	// Inputs
+	reg miso;
+	reg clk;
+	reg reset;
+	reg write;
+	reg [7:0] din;
+	reg cpol;
+	reg cpha;
 
-	parameter d = 2;
-	always @(posedge enable) begin
-		LED <= {r[d][0],r[d][1],r[d][2],r[d][3],r[d][4],r[d][5],r[d][6],r[d][7]};
-	end
+	// Outputs
+	wire sck;
+	wire mosi;
+	wire [7:0] ss;
+	wire busy;
+	wire [7:0] dout;
+	
+	// Instantiate the Unit Under Test (UUT)
+	spi_master spi (
+		.sck(sck), 
+		.mosi(mosi), 
+		.miso(miso), 
+		.ss(ss), 
+		.clk(clk), 
+		.reset(reset), 
+		.write(write), 
+		.busy(busy), 
+		.din(din), 
+		.dout(dout), 
+		.cpol(cpol), 
+		.cpha(cpha)
+	);
+	*/
 	
 	/*
 	 * CPU State.
 	 */
-	parameter R_SP = 11;
-	parameter R_BA = 12;
-	parameter R_FL = 13;
+	localparam R_SP = 11;
+	localparam R_BA = 12;
+	localparam R_FL = 13;
 	
-	parameter FL_N = 32'b0001; // Negative
-	parameter FL_Z = 32'b0010; // Zero
-	parameter FL_V = 32'b0100; // Overflow
-	parameter FL_C = 32'b1000; // Carry
+	localparam FL_N = 32'b0001; // Negative
+	localparam FL_Z = 32'b0010; // Zero
+	localparam FL_V = 32'b0100; // Overflow
+	localparam FL_C = 32'b1000; // Carry
 	
 	reg [31:0] r [0:15];
 	wire [31:0] flag;
@@ -83,68 +122,71 @@ module waxwing_test1(
 	/*
 	 * Instruction and components.
 	 */
-	reg [7:0] inst [0:7];
-	initial begin
-		inst[0] = 0;
-		inst[1] = 0;
-		inst[2] = 0;
-		inst[3] = 0;
-		inst[4] = 0;
-		inst[5] = 0;
-		inst[6] = 0;
-		inst[7] = 0;
-	end
-	wire [7:0] opcode, mode, reg0, reg1;
-	wire [31:0] raw2;
+	reg [7:0] opcode = 0, mode = 0, reg0 = 0, reg1 = 0;
+	reg [31:0] raw2 = 0;
 	
-	assign {opcode, mode, reg0, reg1} = {inst[7], inst[6], inst[5], inst[4]};
-	assign raw2 = {inst[0],inst[1],inst[2],inst[3]};
+	localparam I_NOP = 8'b00000000;
 	
-	parameter I_NOP = 8'b00000000;
+	localparam I_ADD = 8'b00000001;
+	localparam I_SUB = 8'b00000010;
+	localparam I_ADC = 8'b00000011;
+	localparam I_SBC = 8'b00000100;
+	localparam I_MUL = 8'b00000101;
+	localparam I_DIV = 8'b00000110;
 	
-	parameter I_ADD = 8'b00000001;
-	parameter I_SUB = 8'b00000010;
-	parameter I_ADC = 8'b00000011;
-	parameter I_SBC = 8'b00000100;
-	parameter I_MUL = 8'b00000101;
-	parameter I_DIV = 8'b00000110;
+	localparam I_LDW = 8'b00000111;
+	localparam I_LDB = 8'b00001000;
+	localparam I_STW = 8'b00001001;
+	localparam I_STB = 8'b00001010;
 	
-	parameter I_LDW = 8'b00000111;
-	parameter I_LDB = 8'b00001000;
-	parameter I_STW = 8'b00001001;
-	parameter I_STB = 8'b00001010;
+	localparam I_MOV = 8'b00001011;
 	
-	parameter I_MOV = 8'b00001011;
+	localparam I_AND = 8'b00001100;
+	localparam I_OR  = 8'b00001101;
+	localparam I_XOR = 8'b00001110;
+	localparam I_NOR = 8'b00001111;
+	localparam I_LSL = 8'b00010000;
+	localparam I_LSR = 8'b00010001;
 	
-	parameter I_AND = 8'b00001100;
-	parameter I_OR  = 8'b00001101;
-	parameter I_XOR = 8'b00001110;
-	parameter I_NOR = 8'b00001111;
-	parameter I_LSL = 8'b00010000;
-	parameter I_LSR = 8'b00010001;
+	localparam I_CMP = 8'b00010010;
+	localparam I_JMP = 8'b00010011;
+	localparam I_JZ  = 8'b00010100;
+	localparam I_JNZ = 8'b00010101;
+	localparam I_JL  = 8'b00010110;
+	localparam I_JGE = 8'b00010111;
 	
-	parameter I_CMP = 8'b00010010;
-	parameter I_JMP = 8'b00010011;
-	parameter I_JZ  = 8'b00010100;
-	parameter I_JNZ = 8'b00010101;
-	parameter I_JL  = 8'b00010110;
-	parameter I_JGE = 8'b00010111;
-	
-	parameter I_DIE = 8'b11111111;
+	localparam I_DIE = 8'b11111111;
 	
 	/*
 	 * Decoded operands.
 	 */
-	 reg [31:0] opr0, opr1, opr2, jmp_addr, pc_addr;
+	reg [31:0] opr0, opr1, opr2, jmp_addr, pc_addr, st_addr, ld_addr;
+	
+	/*
+	 * Memory mapped IO state.
+	 */
+	localparam MMAP_START = 32'h2000;
+	localparam MMAP_END = 32'h2004;
+	localparam I_MMAP = 8'b11111110;
+	
+	reg [31:0] mmap_reg [0:3];
+	reg [7:0] mmap_opcode = 0;
+	
+	initial begin
+		mmap_reg[0] = 0;
+		mmap_reg[1] = 0;
+		mmap_reg[2] = 0;
+		mmap_reg[3] = 0;
+	end
 
 	/*
 	 * CPU state machine.
 	 */
-	parameter STATE_RESET = 3'h0;
-	parameter STATE_FETCH = 3'h1;
-	parameter STATE_DECODE = 3'h2;
-	parameter STATE_EXECUTE = 3'h3;
-	parameter STATE_HALT = 3'h4;
+	localparam STATE_RESET = 3'h0;
+	localparam STATE_FETCH = 3'h1;
+	localparam STATE_DECODE = 3'h2;
+	localparam STATE_EXECUTE = 3'h3;
+	localparam STATE_HALT = 3'h4;
 	
 	reg [2:0] state = STATE_RESET;
 	reg [3:0] bytes_left = 8;
@@ -159,8 +201,36 @@ module waxwing_test1(
 			end
 			
 			STATE_FETCH : begin
-				inst[bytes_left - 4'b1] <= douta;
+				//inst[bytes_left - 4'b1] <= douta;
 				//PC <= PC + 1;
+				case (bytes_left)
+					4'h8 : opcode <= douta;
+					4'h7 : mode <= douta;
+					4'h6 : begin
+						reg0 <= douta;
+						opr0 <= r[douta[3:0]];
+					end
+					4'h5 : begin
+						reg1 <= douta;
+						opr1 <= r[douta[3:0]];
+					end
+					4'h4 : raw2[7:0] <= douta;
+					4'h3 : raw2[15:8] <= douta;
+					4'h2 : raw2[23:16] <= douta;
+					4'h1 : begin
+						raw2[31:24] <= douta;
+						opr2 <= mode[0] ? r[raw2[3:0]] : {douta, raw2[23:0]};
+						st_addr <= (mode[1] == 0) ? opr0 + r[R_BA] : opr0;
+						/*
+						 * This looks pretty nasty, but it's really just:
+						 *
+						 *     ld_addr <= (mode[1] == 0) ? r[R_BA] + opr2 : opr2;
+						 */
+						ld_addr <= (mode[1] == 0)
+							? r[R_BA] + (mode[0] ? r[raw2[3:0]] : {douta, raw2[23:0]})
+							: (mode[0] ? r[raw2[3:0]] : {douta, raw2[23:0]});
+					end
+				endcase
 				addr <= addr[15:0] + 16'b1;
 				bytes_left <= bytes_left - 4'b1;
 				if (bytes_left == 1) begin
@@ -169,10 +239,6 @@ module waxwing_test1(
 			end
 			
 			STATE_DECODE : begin
-				opr0 <= r[reg0[3:0]];
-				opr1 <= r[reg1[3:0]];
-				opr2 <= mode[0] ? r[raw2[3:0]] : raw2;
-				
 				/*
 				 * Set jmp_addr early in case this is a jump opcode.
 				 */
@@ -181,22 +247,30 @@ module waxwing_test1(
 				/*
 				 * Setup memory access early for load / store.
 				 */
+				pc_addr <= addr;
 				if (opcode == I_LDB || opcode == I_LDW) begin
-					pc_addr <= addr;
-					addr <= (mode[1] == 0) ?
-						(mode[0] ? r[raw2[3:0]] : raw2) + r[R_BA] :
-						(mode[0] ? r[raw2[3:0]] : raw2);
+					if ((ld_addr >= MMAP_START) && (ld_addr < MMAP_END)) begin
+						mmap_opcode <= opcode;
+						opcode <= I_MMAP;
+						addr <= ld_addr - MMAP_START;
+					end else begin
+						addr <= ld_addr;
+						if (opcode == I_LDW)
+							bytes_left <= 4'h4;
+					end
 				end
 				if (opcode == I_STB || opcode == I_STW) begin
-					pc_addr <= addr;
-					addr <= (mode[1] == 0) ?
-						r[reg0[3:0]] + r[R_BA] :
-						r[reg0[3:0]];
-					dina <= mode[0] ? r[raw2[3:0]] : raw2;
-					wea <= 1'b1;
-				end
-				if (opcode == I_LDW || opcode == I_STW) begin
-					bytes_left <= 4'h4;
+					if ((st_addr >= MMAP_START) && (st_addr < MMAP_END)) begin
+						mmap_opcode <= opcode;
+						opcode <= I_MMAP;
+						addr <= st_addr - MMAP_START;
+					end else begin
+						addr <= st_addr;
+						dina <= opr2;
+						wea <= 1'b1;
+						if (opcode == I_STW)
+							bytes_left <= 4'h4;
+					end
 				end
 				
 				state <= STATE_EXECUTE;
@@ -249,6 +323,18 @@ module waxwing_test1(
 						addr <= addr[15:0] + 16'b1;
 						bytes_left <= bytes_left - 4'b1;
 					end
+					
+					/*
+					 * Memory mapped IO.
+					 */
+					I_MMAP : begin
+						case (mmap_opcode)
+							I_STB : mmap_reg[addr] <= opr2[7:0];
+							I_STW : mmap_reg[addr] <= opr2;
+							I_LDB : r[reg0][7:0] <= mmap_reg[addr];
+							I_LDW : r[reg0] <= mmap_reg[addr];
+						endcase
+					end
 
 					/*
 					 * Bitwise operations.
@@ -264,8 +350,8 @@ module waxwing_test1(
 					 * Branches and jumps.
 					 */
 					I_CMP : begin
-						r[R_FL][FL_Z] <= (r[reg0] - opr2) == 0;
-						r[R_FL][FL_C] <= r[reg0] < opr2;
+						r[R_FL][FL_Z] <= (opr0 - opr2) == 0;
+						r[R_FL][FL_C] <= opr0 < opr2;
 					end
 					
 					I_JMP : addr <= jmp_addr;
@@ -290,6 +376,14 @@ module waxwing_test1(
 					 * Halt, but don't catch fire.
 					 */
 					I_DIE : state <= STATE_HALT;
+					
+					/*
+					 * Invalid instruction.
+					 */
+					default : begin
+						//TODO: Trigger interrupt.
+						state <= STATE_HALT;
+					end
 				endcase
 				
 				/*
@@ -299,7 +393,8 @@ module waxwing_test1(
 				 */
 				if (opcode != I_DIE && bytes_left < 2) begin
 					if (opcode == I_STB || opcode == I_STW ||
-						 opcode == I_LDB || opcode == I_LDW) begin
+						 opcode == I_LDB || opcode == I_LDW ||
+						 opcode == I_MMAP) begin
 						/*
 						 * Load and store instructions overwrite the addr,
 						 * set it back to the PC.
