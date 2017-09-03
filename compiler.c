@@ -847,6 +847,9 @@ readSourceUntil(FILE *fp, char *sentinel)
 	return -1;
 }
 
+/*
+ * Caller must free the token that is returned.
+ */
 static char *
 readSourceToken(FILE *fp, struct Grammar *grammar)
 {
@@ -969,26 +972,26 @@ matchSymbol(struct Symbol *symbol, char *token)
 	if (symbol->type == SYMBOL_TERMINAL) {
 		if (strcmp(token, symbol->token) == 0) {
 			fprintf(stderr, "T:%s\n", token);
-			return 1;
+			return 0;
 		}
 	} else if (symbol->type == SYMBOL_REFERENCE) {
 		;
 	} else if (symbol->type == SYMBOL_LITERAL) {
 		if (isLiteral(token) == 1) {
 			fprintf(stderr, "L:%s\n", token);
-			return 1;
+			return 0;
 		}
 	} else if (symbol->type == SYMBOL_IDENTIFIER) {
 		if (isIdentifier(token) == 1) {
 			fprintf(stderr, "I:%s\n", token);
-			return 1;
+			return 0;
 		}
 	} else {
 		fprintf(stderr, "Bad symbol type?!\n");
 		return -1;
 	}
 
-	return 0;
+	return 1;
 }
 
 /*
@@ -997,15 +1000,17 @@ matchSymbol(struct Symbol *symbol, char *token)
  *  1 Rule does not match.
  */
 static int
-matchRule(struct Grammar *grammar, struct Rule *rule, struct Stack *stack, char **tokenArray, int tokenCount)
+matchRule(struct Grammar *grammar, struct Rule *rule, struct Stack *stack, char ***tokenArray, int tokenCount)
 {
+	int match;
+
 	if (findInStack(stack, rule->name) == 0) {
 		/*
 		 * This rule is already in the rule stack. That means we are
 		 * infinitely recursing without getting closer to matching a
 		 * full rule.
 		 */
-		return 0;
+		return 1;
 		
 	}
 	stackPush(stack, rule->name);
@@ -1015,7 +1020,7 @@ matchRule(struct Grammar *grammar, struct Rule *rule, struct Stack *stack, char 
 	int j, k;
 	for (j = 0; j < rule->numStrings; j++) {
 		struct SymbolString *string = &rule->strings[j];
-		char **tokens = tokenArray;
+		char **tokens = *tokenArray;
 		int tokensLeft = tokenCount;
 
 		/*
@@ -1024,30 +1029,69 @@ matchRule(struct Grammar *grammar, struct Rule *rule, struct Stack *stack, char 
 		for (k = 0; k < string->numSymbols; k++) {
 			struct Symbol *symbol = &string->symbols[k];
 
+			fprintf(stderr, "Matching token: %s\n", *tokens);
+
 			if (symbol->type == SYMBOL_REFERENCE) {
 				struct Rule *ref;
 				
 				ref = findRuleByName(grammar, symbol->token);
-				if (matchRule(grammar, ref, stack, tokens, tokensLeft) != 0) {
+				match = matchRule(grammar, ref, stack, &tokens, tokensLeft);
+				if (match != 0) {
 					break;
 				}
+
+				/*
+				 * We don't need to advance the tokens array.
+				 * The matchRule() call did that for us.
+				 */
+				continue;
 			}
 
 			/*
 			 * Does symbol match?
 			 */
-			int match = matchSymbol(symbol, *tokens);
+			match = matchSymbol(symbol, *tokens);
 			if (match != 0) {
-				stackPop(stack);
-				return match;
+				break;
 			}
 
 			tokensLeft--;
 			tokens++;
 		}
+
+		if (match < 0) {
+			stackPop(stack);
+			return -1;
+		} else if (match == 0) {
+			/*
+			 * Symbol string matches.
+			 */
+			fprintf(stderr, "Full symbol string matches!\n");
+			*tokenArray = tokens;
+			stackPop(stack);
+			return 0;
+		}
 	}
 
 	stackPop(stack);
+	return 1;
+}
+
+static int
+printSourceToken(char *token)
+{
+	/*
+	 * Pretty print.
+	 */
+	fprintf(stderr, "%s", token);
+	if (!strcmp(token, ";") ||
+		!strcmp(token, "{") ||
+		!strcmp(token, "}")) {
+		fprintf(stderr, "\n");
+	} else {
+		fprintf(stderr, " ");
+	}
+
 	return 0;
 }
 
@@ -1068,17 +1112,7 @@ parseSourceFile(char *path, struct Grammar *grammar)
 	while (((token = readSourceToken(fp, grammar)) != NULL) &&
 		   (token != (char *)-1)) {
 
-		/*
-		 * Pretty print.
-		 */
-		fprintf(stderr, "%s", token);
-		if (!strcmp(token, ";") ||
-			!strcmp(token, "{") ||
-			!strcmp(token, "}")) {
-			fprintf(stderr, "\n");
-		} else {
-			fprintf(stderr, " ");
-		}
+		printSourceToken(token);
 
 		/*
 		 * Increase the token array size.
@@ -1089,6 +1123,14 @@ parseSourceFile(char *path, struct Grammar *grammar)
 			fprintf(stderr, "Can't grow tokenArray: %s\n", strerror(errno));
 			return -1;
 		}
+
+		tokenArray[tokenCount-1] = token;
+	}
+
+	fprintf(stderr, "Parsed %d tokens.\n", tokenCount);
+	int i;
+	for (i = 0; i < tokenCount; i++) {
+		printSourceToken(tokenArray[i]);
 	}
 
 	struct Stack *stack;
@@ -1100,7 +1142,7 @@ parseSourceFile(char *path, struct Grammar *grammar)
 	struct Rule *rule;
 
 	rule = findRuleByName(grammar, "stmt");
-	matchRule(grammar, rule, stack, tokenArray, tokenCount);
+	matchRule(grammar, rule, stack, &tokenArray, tokenCount);
 
 	return 0;
 }
