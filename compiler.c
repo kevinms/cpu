@@ -20,12 +20,14 @@ static int dumpParseTree;
 
 static struct option longopts[] = {
 	{"help", no_argument, NULL, 'h'},
-	{"parse-tree", no_argument, NULL, 'p'}
+	{"parse-tree", no_argument, NULL, 'p'},
+	{"grammar-file", required_argument, NULL, 'g'}
 };
 
 static char *optdesc[] = {
 	"This help.",
-	"Dump parse tree."
+	"Dump parse tree.",
+	"Grammar file to use (Default: 'grammar')"
 };
 
 static char *optstring = NULL;
@@ -73,12 +75,14 @@ parseArgs(int argc, char **argv)
 
 	while ((c = getopt_long(argc, argv, optstring, longopts, &longindex)) >= 0) {
 		switch (c) {
-			case 'p':
-				dumpParseTree = 1;
-				break;
 			case 'h':
 				usage(argc, argv);
 				break;
+			case 'p':
+				dumpParseTree = 1;
+				break;
+			case 'g':
+				grammarFile = strdup(optarg);
 			case '?':
 				break;
 			default:
@@ -199,6 +203,99 @@ dumpRule(struct Rule *rule)
 		}
 	}
 	fprintf(stderr, ";\n");
+}
+
+struct Stack {
+	char **data;
+	int count;
+};
+
+static struct Stack *
+stackInit()
+{
+	struct Stack *stack;
+
+	if ((stack = malloc(sizeof(*stack))) == NULL) {
+		fprintf(stderr, "Failed to allocate stack: %s\n", strerror(errno));
+	}
+	memset(stack, 0, sizeof(*stack));
+
+	return stack;
+}
+
+/*
+ * -1 An error occurred.
+ *  0 Successful.
+ */
+static int
+stackPush(struct Stack *stack, char *token)
+{
+	if (stack == NULL) {
+		fprintf(stderr, "Invalid parameter.\n");
+		return -1;
+	}
+
+	stack->count++;
+	stack->data = realloc(stack->data, sizeof(*stack->data) * stack->count);
+	if (stack->data == NULL) {
+		fprintf(stderr, "Can't grow stack: %s\n", strerror(errno));
+		return -1;
+	}
+
+	stack->data[stack->count-1] = strdup(token);
+
+	return 0;
+}
+
+/*
+ * Caller must free the token that is returned.
+ * NULL An error occurred.
+ */
+static char *
+stackPop(struct Stack *stack)
+{
+	char *token;
+
+	if (stack == NULL) {
+		fprintf(stderr, "Invalid parameter.\n");
+		return NULL;
+	}
+
+	token = stack->data[stack->count-1];
+
+	stack->count--;
+	if (stack->count > 0) {
+		stack->data = realloc(stack->data, sizeof(*stack->data) * stack->count);
+		if (stack->data == NULL) {
+			fprintf(stderr, "Can't shrink stack: %s\n", strerror(errno));
+			return NULL;
+		}
+	} else {
+		free(stack->data);
+		stack->data = NULL;
+	}
+
+	return token;
+}
+
+/*
+ *  0 Found in stack.
+ *  1 Not found in the stack.
+ */
+static int
+findInStack(struct Stack *stack, char *token)
+{
+	int i;
+
+	for (i = 0; i < stack->count; i++) {
+		if (strcmp(stack->data[i], token) == 0) {
+			/*
+			 * Found a match.
+			 */
+			return 0;
+		}
+	}
+	return 1;
 }
 
 /*
@@ -861,11 +958,106 @@ readSourceToken(FILE *fp, struct Grammar *grammar)
 	return strdup(token);
 }
 
+/*
+ * -1 An error occurred.
+ *  0 Symbol matches token.
+ *  1 Symbol doesn't match token.
+ */
+static int
+matchSymbol(struct Symbol *symbol, char *token)
+{
+	if (symbol->type == SYMBOL_TERMINAL) {
+		if (strcmp(token, symbol->token) == 0) {
+			fprintf(stderr, "T:%s\n", token);
+			return 1;
+		}
+	} else if (symbol->type == SYMBOL_REFERENCE) {
+		;
+	} else if (symbol->type == SYMBOL_LITERAL) {
+		if (isLiteral(token) == 1) {
+			fprintf(stderr, "L:%s\n", token);
+			return 1;
+		}
+	} else if (symbol->type == SYMBOL_IDENTIFIER) {
+		if (isIdentifier(token) == 1) {
+			fprintf(stderr, "I:%s\n", token);
+			return 1;
+		}
+	} else {
+		fprintf(stderr, "Bad symbol type?!\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+/*
+ * -1 Encountered an error.
+ *  0 Rule matches.
+ *  1 Rule does not match.
+ */
+static int
+matchRule(struct Grammar *grammar, struct Rule *rule, struct Stack *stack, char **tokenArray, int tokenCount)
+{
+	if (findInStack(stack, rule->name) == 0) {
+		/*
+		 * This rule is already in the rule stack. That means we are
+		 * infinitely recursing without getting closer to matching a
+		 * full rule.
+		 */
+		return 0;
+		
+	}
+	stackPush(stack, rule->name);
+
+	dumpRule(rule);
+
+	int j, k;
+	for (j = 0; j < rule->numStrings; j++) {
+		struct SymbolString *string = &rule->strings[j];
+		char **tokens = tokenArray;
+		int tokensLeft = tokenCount;
+
+		/*
+		 * Try to match each Symbol within the SymbolString.
+		 */
+		for (k = 0; k < string->numSymbols; k++) {
+			struct Symbol *symbol = &string->symbols[k];
+
+			if (symbol->type == SYMBOL_REFERENCE) {
+				struct Rule *ref;
+				
+				ref = findRuleByName(grammar, symbol->token);
+				if (matchRule(grammar, ref, stack, tokens, tokensLeft) != 0) {
+					break;
+				}
+			}
+
+			/*
+			 * Does symbol match?
+			 */
+			int match = matchSymbol(symbol, *tokens);
+			if (match != 0) {
+				stackPop(stack);
+				return match;
+			}
+
+			tokensLeft--;
+			tokens++;
+		}
+	}
+
+	stackPop(stack);
+	return 0;
+}
+
 static int
 parseSourceFile(char *path, struct Grammar *grammar)
 {
 	FILE *fp;
 	char *token;
+	char **tokenArray = NULL;
+	int tokenCount = 0;
 
 	if ((fp = fopen(path, "r")) == NULL) {
 		fprintf(stderr, "Can't open %s: %s\n", path, strerror(errno));
@@ -875,8 +1067,40 @@ parseSourceFile(char *path, struct Grammar *grammar)
 
 	while (((token = readSourceToken(fp, grammar)) != NULL) &&
 		   (token != (char *)-1)) {
-		fprintf(stderr, "Token: %s\n", token);
+
+		/*
+		 * Pretty print.
+		 */
+		fprintf(stderr, "%s", token);
+		if (!strcmp(token, ";") ||
+			!strcmp(token, "{") ||
+			!strcmp(token, "}")) {
+			fprintf(stderr, "\n");
+		} else {
+			fprintf(stderr, " ");
+		}
+
+		/*
+		 * Increase the token array size.
+		 */
+		tokenCount++;
+		tokenArray = realloc(tokenArray, sizeof(*tokenArray) * tokenCount);
+		if (tokenArray == NULL) {
+			fprintf(stderr, "Can't grow tokenArray: %s\n", strerror(errno));
+			return -1;
+		}
 	}
+
+	struct Stack *stack;
+
+	if ((stack = stackInit()) == NULL) {
+		return -1;
+	}
+
+	struct Rule *rule;
+
+	rule = findRuleByName(grammar, "stmt");
+	matchRule(grammar, rule, stack, tokenArray, tokenCount);
 
 	return 0;
 }
