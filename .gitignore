@@ -12,4 +12,6 @@ fs
 heap
 core
 debugger
+compiler
 *.swp
+*.swn
