@@ -134,9 +134,13 @@ char *symbols[] = {
 };
 #define NUM_SYMBOLS (sizeof(symbols) / sizeof(*symbols))
 
-#define T_TERMINAL   0
-#define T_LITERAL    2
-#define T_IDENTIFIER 3
+#define T_TERMINAL    0x1
+#define T_IDENTIFIER  0x2
+#define T_LITERAL_HEX 0x4
+#define T_LITERAL_DEC 0x8
+#define T_LITERAL_STR 0x10
+#define T_LITERAL_CHR 0x20
+#define T_LITERAL (T_LITERAL_HEX | T_LITERAL_DEC | T_LITERAL_STR | T_LITERAL_CHR)
 
 typedef struct Token {
 	char *string;
@@ -207,9 +211,12 @@ typedef struct Program {
 } Program;
 
 static Token *
-nextToken(Program *prog)
+nextToken(Program *prog, int abortOnNull)
 {
 	if (prog->i+1 >= prog->tokenCount) {
+		if (abortOnNull) {
+			abort();
+		}
 		return NULL;
 	}
 	prog->i++;
@@ -294,34 +301,15 @@ isLiteralDec(char *token)
 	return 1;
 }
 
-/*
- * 0  Not a literal.
- * 1  A literal.
- * 2  An incomplete literal.
- */
 static int
-isLiteral(char *token)
+isLiteralStr(char *token)
 {
 	int len = strlen(token);
-	int ret = 0;
 
 	if (len == 0) {
 		return 0;
 	}
 
-	/*
-	 * Numeric literal.
-	 */
-	if ((ret = isLiteralHex(token)) != 0) {
-		return ret;
-	}
-	if (isLiteralDec(token) != 0) {
-		return 1;
-	}
-
-	/*
-	 * String literal.
-	 */
 	if (token[0] == '"') {
 		int i, complete = 0;
 		for (i = 1; i < len; i++) {
@@ -344,9 +332,18 @@ isLiteral(char *token)
 		return 2;
 	}
 
-	/*
-	 * Character literal.
-	 */
+	return 0;
+}
+
+static int
+isLiteralChr(char *token)
+{
+	int len = strlen(token);
+
+	if (len == 0) {
+		return 0;
+	}
+
 	if (token[0] == '\'') {
 		int i, complete = 0, chars = 1;
 		for (i = 1; i < len && chars < 3; i++) {
@@ -368,6 +365,51 @@ isLiteral(char *token)
 			return 1;
 		}
 		return 2;
+	}
+
+	return 0;
+}
+
+/*
+ * 0  Not a literal.
+ * 1  A literal.
+ * 2  An incomplete literal.
+ */
+static int
+isLiteral(char *token, int *type)
+{
+	int len = strlen(token);
+	int ret = 0;
+
+	if (type == NULL) {
+		fprintf(stderr, "Invalid argument?!\n");
+		abort();
+	}
+	*type = 0;
+
+	if (len == 0) {
+		return 0;
+	}
+
+	/*
+	 * Numeric literal.
+	 */
+	if ((ret = isLiteralHex(token)) != 0) {
+		*type = T_LITERAL_HEX;
+		return ret;
+	}
+	if (isLiteralDec(token) != 0) {
+		*type = T_LITERAL_DEC;
+		return 1;
+	}
+
+	if ((ret = isLiteralStr(token)) != 0) {
+		*type = T_LITERAL_STR;
+		return ret;
+	}
+	if ((ret = isLiteralChr(token)) != 0) {
+		*type = T_LITERAL_CHR;
+		return ret;
 	}
 
 	return 0;
@@ -421,7 +463,6 @@ readToken(FILE *fp, Program *prog)
 	memset(buf, 0, sizeof(buf));
 
 	while (((c = fgetc(fp)) != EOF) && (ferror(fp) == 0)) {
-		fprintf(stderr, "read: %c\n", c);
 		if (c == '\n') {
 			prog->lineCount++;
 		}
@@ -493,14 +534,13 @@ readToken(FILE *fp, Program *prog)
 			continue;
 		}
 
-		i = isLiteral(buf);
+		int literalType;
+		i = isLiteral(buf, &literalType);
 		if (i != 0) {
-			type = T_LITERAL;
+			type = literalType;
 			partialMatch = (i == 2) ? 1 : 0;
 			continue;
 		}
-
-		fprintf(stderr, "Breaking on %c\n", buf[len-1]);
 
 		/*
 		 * We didn't find a match. Remove the last char.
@@ -549,17 +589,20 @@ printToken(Token *token, int pretty)
 	char *type = "";
 
 	if (pretty == 0) {
-		fprintf(stderr, "%d: ", token->line);
+		fprintf(stderr, "%d ", token->line);
 		if (token->type == T_TERMINAL) {
-			type = "t:";
+			type = "t";
 		}
-		else if (token->type == T_LITERAL) {
-			type = "l:";
+		else if (token->type & T_LITERAL) {
+			type = "l";
 		}
 		else if (token->type == T_IDENTIFIER) {
-			type = "i:";
+			type = "i";
+		} else {
+			fprintf(stderr, "Token does not have a valid type?! %s\n", token->string);
+			abort();
 		}
-		fprintf(stderr, "%s", type);
+		fprintf(stderr, "%s: ", type);
 	}
 
 	fprintf(stderr, "%s", token->string);
@@ -616,10 +659,11 @@ lexer(char *path, Program *prog)
 	prog->tokenCount = tokenCount;
 	prog->i = -1;
 
-	fprintf(stderr, "Parsed %d tokens.\n", tokenCount);
-	while ((token = nextToken(prog)) != NULL) {
+	while ((token = nextToken(prog, 0)) != NULL) {
 		printToken(token, 0);
 	}
+	fprintf(stderr, "Read %d tokens on %d lines.\n",
+			tokenCount, tokenArray[tokenCount-1]->line);
 
 	prog->i = -1;
 
@@ -735,6 +779,19 @@ isType(Program *p, Token *t)
 	return 0;
 }
 
+void
+error(int line, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	fprintf(stderr, "Line %d: ", line);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+
+	abort();
+}
+
 /*
 typedef struct Type {
 	Token *token;
@@ -751,7 +808,7 @@ typedef struct Type {
  * <u8 | u32 | void | <struct>> [*[*]] <ident>;
  */
 static Type *
-parseType(Program *prog, Type *type)
+parseType(Program *prog, Type *type, int allowArray)
 {
 	if (type == NULL) {
 		if ((type = malloc(sizeof(*type))) == NULL) {
@@ -761,12 +818,42 @@ parseType(Program *prog, Type *type)
 	}
 	memset(type, 0, sizeof(*type));
 
-	Token *token = nextToken(prog);
+	Token *token = nextToken(prog, 1);
 	if (!isType(prog, token)) {
 		fprintf(stderr, "Expected type name but got: %s\n", token->string);
 		abort();
 	}
 	type->token = token;
+
+	token = nextToken(prog, 1);
+	if (allowArray && match(token, "[")) {
+		/*
+		 * Array.
+		 */
+		token = nextToken(prog, 1);
+		if ((token->type & (T_LITERAL_HEX | T_LITERAL_DEC)) == 0) {
+			error(token->line, "Array size must be numerical literal but got: %s\n",
+			      token->string);
+		}
+		token = nextToken(prog, 1);
+		if (!match(token, "]")) {
+			error(token->line, "Expected closing ] but got: %s\n", token->string);
+		}
+	} else if (match(token, "*")) {
+		/*
+		 * Pointer.
+		 */
+		token = nextToken(prog, 1);
+		while (match(token, "*")) {
+			token = nextToken(prog, 1);
+		}
+		prog->i--;
+	} else {
+		/*
+		 * Oops, guess we didn't need the token.
+		 */
+		prog->i--;
+	}
 
 	return type;
 }
@@ -795,9 +882,9 @@ parseArg(Program *prog, Arg *arg)
 	}
 	memset(arg, 0, sizeof(*arg));
 
-	parseType(prog, &arg->type);
+	parseType(prog, &arg->type, 0);
 
-	Token *token = nextToken(prog);
+	Token *token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
 		fprintf(stderr, "Expected identifier but got: %s\n", token->string);
 		abort();
@@ -831,45 +918,45 @@ parseFunction(Program *prog)
 	}
 	memset(func, 0, sizeof(*func));
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
 		fprintf(stderr, "Expected function name but got: %s\n", token->string);
 		abort();
 	}
 	func->name = token->string;
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	if (!match(token, "(")) {
 		fprintf(stderr, "Expected ( but got: %s\n", token->string);
 		abort();
 	}
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	while (!match(token, ")")) {
 		prog->i--;
 		Arg *arg = parseArg(prog, NULL);
 		listAppend(&func->args, arg);
 
-		token = nextToken(prog);
+		token = nextToken(prog, 1);
 		if (match(token, ",")) {
-			token = nextToken(prog);
+			token = nextToken(prog, 1);
 		}
 	}
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	if (!match(token, "{")) {
 		prog->i--;
-		parseType(prog, &func->type);
+		parseType(prog, &func->type, 0);
 	}
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	if (!match(token, "{")) {
 		fprintf(stderr, "Expected { but got: %s\n", token->string);
 		abort();
 	}
 
 	int braceStack = 0;
-	while ((token = nextToken(prog)) != NULL) {
+	while ((token = nextToken(prog, 0)) != NULL) {
 		if (match(token, "{")) {
 			braceStack++;
 		}
@@ -883,18 +970,6 @@ parseFunction(Program *prog)
 	}
 
 	return func;
-}
-
-void
-error(int line, const char *fmt, ...) {
-	va_list args;
-
-	va_start(args, fmt);
-	fprintf(stderr, "Line %d: ", line);
-	vfprintf(stderr, fmt, args);
-	va_end(args);
-
-	abort();
 }
 
 static Variable *
@@ -911,28 +986,27 @@ parseVariable(Program *prog)
 	}
 	memset(var, 0, sizeof(*var));
 
-	parseType(prog, &var->type);
+	parseType(prog, &var->type, 1);
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
 		error(token->line, "Expected variable name but got: %s\n", token->string);
 	}
 	var->name = token->string;
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	if (match(token, "=")) {
 		/*
 		 * Initialize variable to literal.
 		 */
-		token = nextToken(prog);
-		printToken(token, 0);
-		if (token->type != T_LITERAL) {
+		token = nextToken(prog, 1);
+		printf("0x%x\n", token->type);
+		if ((token->type & T_LITERAL) == 0) {
 			error(token->line, "Variables can only be initialized to literals,"
-			      " but got: %s", token->string);
+			      " but got: %s\n", token->string);
 		}
 		var->initValue = token;
-		token = nextToken(prog);
-		printToken(token, 0);
+		token = nextToken(prog, 1);
 	}
 	
 	if (!match(token, ";")) {
@@ -956,30 +1030,30 @@ parseStruct(Program *prog)
 	}
 	memset(s, 0, sizeof(*s));
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
 		fprintf(stderr, "Expected struct name but got: %s\n", token->string);
 		abort();
 	}
 	s->name = token->string;
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	if (!match(token, "{")) {
 		fprintf(stderr, "Expected { but got: %s\n", token->string);
 		abort();
 	}
 
-	token = nextToken(prog);
+	token = nextToken(prog, 1);
 	while (!match(token, "}")) {
 		prog->i--;
 		Arg *arg = parseArg(prog, NULL);
 		listAppend(&s->members, arg);
 
-		token = nextToken(prog);
+		token = nextToken(prog, 1);
 		if (!match(token, ";")) {
 			error(token->line, "Expected ; but got: %s\n", token->string);
 		}
-		token = nextToken(prog);
+		token = nextToken(prog, 1);
 	}
 
 	return s;
@@ -989,7 +1063,7 @@ static int
 parser(Program *prog)
 {
 	Token *token;
-	while ((token = nextToken(prog)) != NULL) {
+	while ((token = nextToken(prog, 0)) != NULL) {
 		fprintf(stderr, "Checking: %s\n", token->string);
 		/*
 		 * At global scope:

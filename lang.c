@@ -1,8 +1,8 @@
 
-u8 fred = 32;
+u32[42] fred = 32;
 
 u8 bar = '\'';
-u8 bar = "a\\  \"bcd";
+u8 *bar = "a\\  \"bcd";
 u8 bar = 0xDEAD;
 
 struct Foo {
