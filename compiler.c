@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <inttypes.h>
 #include <string.h>
 #include <errno.h>
@@ -8,26 +9,19 @@
 #include <unistd.h>
 #include <getopt.h>
 
-#define STATE_NAME         0
-#define STATE_NAME_DELIM   1
-#define STATE_SYMBOL       2
-#define STATE_SYMBOL_DELIM 3
-#define STATE_DONE         4
+#include "list.h"
 
 static char *file;
-static char *grammarFile = "grammar";
 static int dumpParseTree;
 
 static struct option longopts[] = {
 	{"help", no_argument, NULL, 'h'},
 	{"parse-tree", no_argument, NULL, 'p'},
-	{"grammar-file", required_argument, NULL, 'g'}
 };
 
 static char *optdesc[] = {
 	"This help.",
 	"Dump parse tree.",
-	"Grammar file to use (Default: 'grammar')"
 };
 
 static char *optstring = NULL;
@@ -55,7 +49,7 @@ usage(int argc, char **argv)
 }
 
 static void
-parseArgs(int argc, char **argv)
+mainArgs(int argc, char **argv)
 {
 	int c, i;
 	int longindex;
@@ -81,8 +75,6 @@ parseArgs(int argc, char **argv)
 			case 'p':
 				dumpParseTree = 1;
 				break;
-			case 'g':
-				grammarFile = strdup(optarg);
 			case '?':
 				break;
 			default:
@@ -100,204 +92,6 @@ parseArgs(int argc, char **argv)
 	}
 }
 
-#if 0
-struct Array {
-	void *elements;
-	int numElements;
-};
-
-static int
-addElement(struct Array *array, void *element, void *elementSize)
-{
-	array->numElements++;
-	element = realloc(array->elements,
-					   sizeof(*array->elements) * array->numElements);
-	if (element == NULL) {
-		fprintf(stderr, "Can't allocate a new element: %s\n", strerror(errno));
-		return -1;
-	}
-	array->elements = element;
-	element = &array->elements[array->numElements - 1];
-	memset(element, 0, sizeof(*element));
-}
-
-static int
-getElement(struct Array *array, int element)
-{
-
-}
-#endif
-
-#define SYMBOL_TERMINAL   0
-#define SYMBOL_REFERENCE  1
-#define SYMBOL_LITERAL    2
-#define SYMBOL_IDENTIFIER 3
-
-struct Symbol {
-	/*
-	 * Types:
-	 *   0. char *        (Terminal Symbol)
-	 *   1. struct Rule * (Non-terminal Symbol)
-	 */
-	char *token;
-	void *value;
-	int type;
-};
-
-struct SymbolString {
-	struct Symbol *symbols;
-	int numSymbols;
-};
-
-struct Rule {
-	char *name;
-
-	/*
-	 * Array of symbol strings.
-	 */
-	struct SymbolString *strings;
-	int numStrings;
-};
-
-struct Grammar {
-	/*
-	 * For now, we will just use an array of rules.
-	 */
-	struct Rule *rules;
-	int numRules;
-
-	/*
-	 * Array of all terminal symbols for tokenizing.
-	 */
-	char **terminals;
-	int numTerminals;
-};
-
-static void
-dumpRule(struct Rule *rule)
-{
-	int i, j;
-
-	if ((rule == NULL) || (rule == (void *)-1)) {
-		return;
-	}
-
-	fprintf(stderr, "%s : ", rule->name);
-	for (i = 0; i < rule->numStrings; i++) {
-		struct SymbolString *string = &rule->strings[i];
-
-		if (i > 0) {
-			fprintf(stderr, " | ");
-		}
-		for (j = 0; j < string->numSymbols; j++) {
-			struct Symbol *symbol = &string->symbols[j];
-
-			if (j > 0) {
-				fprintf(stderr, " ");
-			}
-			if (symbol->type == SYMBOL_TERMINAL) {
-				fprintf(stderr, "'%s'", symbol->token);
-			} else {
-				fprintf(stderr, "%s", symbol->token);
-			}
-		}
-	}
-	fprintf(stderr, ";\n");
-}
-
-struct Stack {
-	char **data;
-	int count;
-};
-
-static struct Stack *
-stackInit()
-{
-	struct Stack *stack;
-
-	if ((stack = malloc(sizeof(*stack))) == NULL) {
-		fprintf(stderr, "Failed to allocate stack: %s\n", strerror(errno));
-	}
-	memset(stack, 0, sizeof(*stack));
-
-	return stack;
-}
-
-/*
- * -1 An error occurred.
- *  0 Successful.
- */
-static int
-stackPush(struct Stack *stack, char *token)
-{
-	if (stack == NULL) {
-		fprintf(stderr, "Invalid parameter.\n");
-		return -1;
-	}
-
-	stack->count++;
-	stack->data = realloc(stack->data, sizeof(*stack->data) * stack->count);
-	if (stack->data == NULL) {
-		fprintf(stderr, "Can't grow stack: %s\n", strerror(errno));
-		return -1;
-	}
-
-	stack->data[stack->count-1] = strdup(token);
-
-	return 0;
-}
-
-/*
- * Caller must free the token that is returned.
- * NULL An error occurred.
- */
-static char *
-stackPop(struct Stack *stack)
-{
-	char *token;
-
-	if (stack == NULL) {
-		fprintf(stderr, "Invalid parameter.\n");
-		return NULL;
-	}
-
-	token = stack->data[stack->count-1];
-
-	stack->count--;
-	if (stack->count > 0) {
-		stack->data = realloc(stack->data, sizeof(*stack->data) * stack->count);
-		if (stack->data == NULL) {
-			fprintf(stderr, "Can't shrink stack: %s\n", strerror(errno));
-			return NULL;
-		}
-	} else {
-		free(stack->data);
-		stack->data = NULL;
-	}
-
-	return token;
-}
-
-/*
- *  0 Found in stack.
- *  1 Not found in the stack.
- */
-static int
-findInStack(struct Stack *stack, char *token)
-{
-	int i;
-
-	for (i = 0; i < stack->count; i++) {
-		if (strcmp(stack->data[i], token) == 0) {
-			/*
-			 * Found a match.
-			 */
-			return 0;
-		}
-	}
-	return 1;
-}
-
 /*
  * Delimiters   | ;
  * Whitespace
@@ -305,382 +99,121 @@ findInStack(struct Stack *stack, char *token)
  * # comments
  */
 
-static int
-readGrammarToken(FILE *fp, char *token, int maxTokenLen)
-{
-	int c;
-	int len = 0;
-	int readingString = 0;
-
-	memset(token, 0, maxTokenLen);
-
-	while (((c = fgetc(fp)) != EOF) && (ferror(fp) == 0)) {
-		if (readingString == 0) {
-			if (c == '\'') {
-				/*
-				 * Found a single quote, so this is the beginning of a string.
-				 */
-				readingString = 1;
-			}
-			if ((c == ':') || (c == ';')) {
-				if (len <= 0) {
-					/*
-					 * The token is currently empty, so this char is the token.
-					 */
-					token[len] = c;
-					len++;
-					break;
-				} else {
-					/*
-					 * Found a delimiter, but it's a special one.
-					 * Seek back and break.
-					 */
-					fseek(fp, -1, SEEK_CUR);
-					break;
-				}
-			}
-			if ((c == ' ') || (c == '\n') || (c == '\t')) {
-				if (len <= 0) {
-					/*
-					 * We only break on whitespace once we have a token.
-					 */
-					continue;
-				} else {
-					/*
-					 * We have a token, so break on whitespace.
-					 */
-					break;
-				}
-			}
-			if (c == '#') {
-				while ((c = fgetc(fp)) != EOF) {
-					/*
-					 * Skip over the comment.
-					 */
-					if (c == '\n') {
-						break;
-					}
-				}
-				if (ferror(fp) != 0) {
-					break;
-				}
-				if (len <= 0) {
-					continue;
-				}
-				break;
-			}
-		} else {
-			if (c == '\'') {
-				/*
-				 * Found the end of a string.
-				 */
-				readingString = 0;
-				token[len] = c;
-				len++;
-				break;
-			}
-		}
-
-		token[len] = c;
-		len++;
-	}
-
-	if (ferror(fp) != 0) {
-		fprintf(stderr, "Error: Failed to read character?!\n");
-		return -1;
-	}
-
-	return len;
+/*
+char *symMathBinary[] = {
+	"|","&","^",
+	"||","&&",
+	"+","-","*","/","%",
+	"==","!=","<",">","<=",">=",
 }
 
-static void
-freeRule(struct Rule *rule)
-{
-	return;
+char *symMathUnary[] = {
+	"~",
+	"!",
+	"-",
 }
+*/
 
-static int
-indexTerminalSymbol(struct Grammar *grammar, struct Symbol *symbol)
-{
-	char **terminal;
+char *symbols[] = {
+	"|","&","^",
+	"||","&&",
+	"+","-","*","/","%",
+	"==","!=","<",">","<=",">=",
+	"~",
+	"!",
+	"-",
+	"=",
+	".","->",
+	"[","]","(",")",",",
+	"u8","u32","void",
+	"struct",
+	";","{","}",
+	"if","else",
+	"while","for","break","continue",
+	"return"
+};
+#define NUM_SYMBOLS (sizeof(symbols) / sizeof(*symbols))
+
+#define T_TERMINAL   0
+#define T_LITERAL    2
+#define T_IDENTIFIER 3
+
+typedef struct Token {
+	char *string;
+	int id;
+	int type;
+	int line;
+} Token;
+
+typedef struct Type {
+	Token *token;
+	int size;
+	int ptr;
+} Type;
+
+typedef struct Arg {
+	Type type;
+	char *name;
+} Arg;
+
+typedef struct Variable {
+	Type type;
+	char *name;
+	int address;
+	Token *initValue;
+} Variable;
+
+typedef struct Statement {
+	// Token
+	List tokens;
+} Statement;
+
+typedef struct Function {
+	Type type;
+	char *name;
+
+	// Arg
+	List args;
+
+	// Statement
+	List statements;
+} Function;
+
+typedef struct Struct {
+	char *name;
+
+	// Arg
+	List members;
+} Struct;
+
+typedef struct Program {
+	/*
+	 * Raw tokens.
+	 */
+	Token **tokenArray;
+	int tokenCount;
 	int i;
 
-	for (i = 0; i < grammar->numTerminals; i++) {
-		if (strcmp(grammar->terminals[i], symbol->token) == 0) {
-			/*
-			 * This terminal symbol has already been indexed.
-			 */
-			return 0;
-		}
-	}
+	int lineCount;
 
-	/*
-	 * Increase the terminal array size.
-	 */
-	grammar->numTerminals++;
-	terminal = realloc(grammar->terminals,
-					   sizeof(*grammar->terminals) * grammar->numTerminals);
-	if (terminal == NULL) {
-		fprintf(stderr, "Can't allocate a new terminal: %s\n", strerror(errno));
-		return -1;
-	}
-	grammar->terminals = terminal;
-	terminal = &grammar->terminals[grammar->numTerminals - 1];
-	memset(terminal, 0, sizeof(*terminal));
+	// Struct
+	List structs;
 
-	*terminal = symbol->token;
+	// Variable
+	List vars;
 
-	fprintf(stderr, "Indexed: %s\n", *terminal);
+	// Function
+	List functions;
+} Program;
 
-	return 0;
-}
-
-static int
-addSymbol(struct Grammar *grammar, struct SymbolString *string, char *token)
+static Token *
+nextToken(Program *prog)
 {
-	struct Symbol *symbol;
-
-	/*
-	 * Increase the symbol array size.
-	 */
-	string->numSymbols++;
-	symbol = realloc(string->symbols,
-					 sizeof(*string->symbols) * string->numSymbols);
-	if (symbol == NULL) {
-		fprintf(stderr, "Can't allocate a new symbol: %s\n", strerror(errno));
-		return -1;
-	}
-	string->symbols = symbol;
-	symbol = &string->symbols[string->numSymbols - 1];
-	memset(symbol, 0, sizeof(*symbol));
-
-	symbol->token = strdup(token);
-
-	if ((token[0] == '\'') &&
-		(token[strlen(token) - 1] == '\'')) {
-		/*
-		 * This is a terminal symbol.
-		 */
-		symbol->type = SYMBOL_TERMINAL;
-
-		/*
-		 * Remove quotes.
-		 */
-		int i;
-		token[strlen(token) - 1] = '\0';
-		for (i = 0; token[i] != '\0'; i++) {
-			token[i] = token[i + 1];
-		}
-		free(symbol->token);
-		symbol->token = strdup(token);
-
-		if (indexTerminalSymbol(grammar, symbol) < 0) {
-			fprintf(stderr, "Error: Can't index terminal symbol: %s\n", symbol->token);
-			free(symbol);
-			return -1;
-		}
-	} else if (strcmp(token, "IDENTIFIER") == 0) {
-		symbol->type = SYMBOL_IDENTIFIER;
-	} else if (strcmp(token, "LITERAL") == 0) {
-		symbol->type = SYMBOL_LITERAL;
-	} else {
-		/*
-		 * This is a non-terminal symbol.
-		 */
-		symbol->type = SYMBOL_REFERENCE;
-	}
-
-	return 0;
-}
-
-static struct Rule *
-readRule(FILE *fp, struct Grammar *grammar, struct Rule *rule)
-{
-	char token[4096];
-	int len;
-	struct SymbolString *string = NULL;
-	int state;
-
-	if (rule == NULL) {
-		fprintf(stderr, "Error: Rule struct is NULL.\n");
-		return (void *)-1;
-	}
-	memset(rule, 0, sizeof(*rule));
-
-	/*
-	 * Simple state machine to parse rules.
-	 */
-	state = STATE_NAME;
-	while ((len = readGrammarToken(fp, token, sizeof(token))) > 0) {
-		//fprintf(stderr, "Token: %s\n", token);
-		if (state == STATE_NAME) {
-			if ((strcmp(token, "|") == 0) ||
-				(strcmp(token, ";") == 0)) {
-				fprintf(stderr, "Expected rule name but read '%s'\n", token);
-				break;
-			}
-			rule->name = strdup(token);
-			state = STATE_NAME_DELIM;
-			continue;
-		}
-		if (state == STATE_NAME_DELIM) {
-			if (strcmp(token, ":") != 0) {
-				fprintf(stderr, "Expected rule delimiter but read '%s'\n", token);
-				break;
-			}
-			state = STATE_SYMBOL;
-			continue;
-		}
-		if (state == STATE_SYMBOL) {
-			if (strcmp(token, ";") == 0) {
-				if (string == NULL) {
-					fprintf(stderr, "Expected symbol string before ';'\n");
-					break;
-				}
-				/*
-				 * Found end of rule.
-				 */
-				state = STATE_NAME;
-				break;
-			}
-
-			if (strcmp(token, "|") == 0) {
-				/*
-				 * Delimiter separating two strings of symbols.
-				 * Start a new SymbolString.
-				 */
-				if (string != NULL) {
-					string = NULL;
-				}
-				continue;
-			}
-
-			if (string == NULL) {
-				/*
-				 * Allocate a new SymbolString.
-				 */
-				rule->numStrings++;
-				string = realloc(rule->strings,
-								 sizeof(*rule->strings) * rule->numStrings);
-				if (string == NULL) {
-					fprintf(stderr, "Can't allocate a new SymbolString: %s\n", strerror(errno));
-					break;
-				}
-				rule->strings = string;
-				string = &rule->strings[rule->numStrings - 1];
-				memset(string, 0, sizeof(*string));
-			}
-
-			if (addSymbol(grammar, string, token) < 0) {
-				fprintf(stderr, "Can't add symbol '%s' to symbol string.\n", token);
-				break;
-			}
-			continue;
-		}
-
-		fprintf(stderr, "Unknown state?!\n");
-	}
-
-	if (state != STATE_NAME) {
-		fprintf(stderr, "Failed to read rule.\n");
-		freeRule(rule);
-		return (void *)-1;
-	}
-
-	if (len <= 0) {
+	if (prog->i+1 >= prog->tokenCount) {
 		return NULL;
 	}
-
-	return rule;
-}
-
-static struct Rule *
-findRuleByName(struct Grammar *grammar, char *name)
-{
-	struct Rule *rule;
-	int i;
-
-	for (i = 0; i < grammar->numRules; i++) {
-		rule = &grammar->rules[i];
-		if (strcmp(rule->name, name) == 0) {
-			/*
-			 * Found a match.
-			 */
-			return rule;
-		}
-	}
-
-	return NULL;
-}
-
-static struct Grammar *
-loadGrammar(char *path)
-{
-	FILE	*fp;
-	struct Grammar *grammar;
-	struct Rule *rule;
-
-	if ((fp = fopen(path, "r")) == NULL) {
-		fprintf(stderr, "Can't open %s: %s\n", path, strerror(errno));
-		return NULL;
-	}
-
-	if ((grammar = malloc(sizeof(*grammar))) == NULL) {
-		fprintf(stderr, "Can't allocate new grammar: %s\n", strerror(errno));
-		fclose(fp);
-		return NULL;
-	}
-	memset(grammar, 0, sizeof(*grammar));
-
-	while (1) {
-		/*
-		 * Increase the rule array size.
-		 */
-		grammar->numRules++;
-		rule = realloc(grammar->rules,
-					   sizeof(*grammar->rules) * grammar->numRules);
-		if (rule == NULL) {
-			fprintf(stderr, "Can't allocate a new rule: %s\n", strerror(errno));
-			return NULL;
-		}
-		grammar->rules = rule;
-		rule = &grammar->rules[grammar->numRules - 1];
-		memset(rule, 0, sizeof(*rule));
-
-		rule = readRule(fp, grammar, rule);
-		if ((rule == NULL) || (rule == (void *)-1)) {
-			grammar->numRules--;
-			break;
-		}
-
-		//dumpRule(rule);
-	}
-
-	/*
-	 * Link all rule references.
-	 */
-	int i, j, k;
-	for (i = 0; i < grammar->numRules; i++) {
-		rule = &grammar->rules[i];
-		dumpRule(rule);
-		for (j = 0; j < rule->numStrings; j++) {
-			struct SymbolString *string = &rule->strings[j];
-			for (k = 0; k < string->numSymbols; k++) {
-				struct Symbol *symbol = &string->symbols[k];
-				if (symbol->type == SYMBOL_REFERENCE) {
-					struct Rule *ref = findRuleByName(grammar, symbol->token);
-					if (ref == NULL) {
-						fprintf(stderr, "Error: Reference to undefined rule %s\n", symbol->token);
-						return NULL;
-					}
-					symbol->value = ref;
-				}
-			}
-		}
-	}
-
-	fclose(fp);
-	return grammar;
+	prog->i++;
+	return prog->tokenArray[prog->i];
 }
 
 static int
@@ -786,40 +319,62 @@ isLiteral(char *token)
 		return 1;
 	}
 
-#if 0
 	/*
 	 * String literal.
 	 */
 	if (token[0] == '"') {
-		for (i = 0; token[i] != '\0'; i++) {
+		int i, complete = 0;
+		for (i = 1; i < len; i++) {
+			if (token[i] == '\\') {
+				i++;
+				continue;
+			}
 			if (token[i] == '"') {
-				count++;
+				i++;
+				complete = 1;
+				break;
 			}
 		}
-		if (count == 1) {
-			return 2;
+		if (i < len) {
+			return 0;
 		}
-		if (count == 2) {
+		if (complete) {
 			return 1;
 		}
-		return 0;
+		return 2;
 	}
 
 	/*
 	 * Character literal.
 	 */
 	if (token[0] == '\'') {
-		for (i = 0; token[i] != '\0'; i++) {
-			
+		int i, complete = 0, chars = 1;
+		for (i = 1; i < len && chars < 3; i++) {
+			chars++;
+			if (token[i] == '\\') {
+				i++;
+				continue;
+			}
+			if (token[i] == '\'') {
+				i++;
+				complete = 1;
+				break;
+			}
 		}
+		if (i < len) {
+			return 0;
+		}
+		if (complete) {
+			return 1;
+		}
+		return 2;
 	}
-#endif
 
 	return 0;
 }
 
 static int
-readSourceUntil(FILE *fp, char *sentinel)
+readUntil(Program *prog, FILE *fp, char *sentinel)
 {
 	int c, i;
 	char token[4096];
@@ -828,6 +383,9 @@ readSourceUntil(FILE *fp, char *sentinel)
 
 	memset(token, 0, sizeof(token));
 	while (((c = fgetc(fp)) != EOF) && (ferror(fp) == 0)) {
+		if (c == '\n') {
+			prog->lineCount++;
+		}
 		if (len == sentinelLen) {
 			/*
 			 * Shift characters left one place.
@@ -850,17 +408,23 @@ readSourceUntil(FILE *fp, char *sentinel)
 /*
  * Caller must free the token that is returned.
  */
-static char *
-readSourceToken(FILE *fp, struct Grammar *grammar)
+static Token *
+readToken(FILE *fp, Program *prog)
 {
 	int c, i;
-	char token[4096];
+	char buf[4096];
+	int type = T_TERMINAL;
 	int len = 0;
 	int partialMatch = 0;
+	int line = 0;
 
-	memset(token, 0, sizeof(token));
+	memset(buf, 0, sizeof(buf));
 
 	while (((c = fgetc(fp)) != EOF) && (ferror(fp) == 0)) {
+		fprintf(stderr, "read: %c\n", c);
+		if (c == '\n') {
+			prog->lineCount++;
+		}
 		if ((c == ' ') || (c == '\n') || (c == '\t')) {
 			/*
 			 * White space is always a delimiter.
@@ -874,63 +438,69 @@ readSourceToken(FILE *fp, struct Grammar *grammar)
 		}
 
 		/*
-		 * Add the char to the token before we know if it will match.
+		 * Add the char to the buf before we know if it will match.
 		 * If it causes a mismatch, we will remove it.
 		 */
-		token[len] = c;
+		buf[len] = c;
 		len++;
 
-		if (strcmp(token, "/*") == 0) {
+		if (len == 1) {
+			line = prog->lineCount;
+		}
+
+		if (strcmp(buf, "/*") == 0) {
 			/*
 			 * Skip over multiline comment.
 			 */
-			if (readSourceUntil(fp, "*/") < 0) {
+			if (readUntil(prog, fp, "*/") < 0) {
 				fprintf(stderr, "Error: Failed to read until '*/'\n");
-				return NULL;
+				abort();
 			}
 			len = 0;
-			memset(token, 0, sizeof(token));
+			memset(buf, 0, sizeof(buf));
 			continue;
 		}
-		if (strcmp(token, "//") == 0) {
+		if (strcmp(buf, "//") == 0) {
 			/*
 			 * Skip over single line comment.
 			 */
-			if (readSourceUntil(fp, "\n") < 0) {
+			if (readUntil(prog, fp, "\n") < 0) {
 				fprintf(stderr, "Error: Failed to read until '\\n'\n");
-				return NULL;
+				abort();
 			}
 			len = 0;
-			memset(token, 0, sizeof(token));
+			memset(buf, 0, sizeof(buf));
 			continue;
 		}
 
 		/*
 		 * Find longest matching terminal.
 		 */
-		for (i = 0; i < grammar->numTerminals; i++) {
-			if (strcmp(grammar->terminals[i], token) == 0) {
-				//fprintf(stderr, "Match: (%s) -> %s\n", grammar->terminals[i], token);
+		for (i = 0; i < NUM_SYMBOLS; i++) {
+			if (strcmp(symbols[i], buf) == 0) {
+				//fprintf(stderr, "Match: (%s) -> %s\n", symbols[i], buf);
 				break;
 			}
 		}
-		if (i < grammar->numTerminals) {
+		if (i < NUM_SYMBOLS) {
+			type = T_TERMINAL;
 			continue;
 		}
 
-		if (isIdentifier(token) != 0) {
-			//fprintf(stderr, "Match ident: %s\n", token);
+		if (isIdentifier(buf) != 0) {
+			//fprintf(stderr, "Match ident: %s\n", buf);
+			type = T_IDENTIFIER;
 			continue;
 		}
 
-		i = isLiteral(token);
+		i = isLiteral(buf);
 		if (i != 0) {
-			partialMatch = 0;
-			if (i == 2) {
-				partialMatch = 1;
-			}
+			type = T_LITERAL;
+			partialMatch = (i == 2) ? 1 : 0;
 			continue;
 		}
+
+		fprintf(stderr, "Breaking on %c\n", buf[len-1]);
 
 		/*
 		 * We didn't find a match. Remove the last char.
@@ -938,169 +508,83 @@ readSourceToken(FILE *fp, struct Grammar *grammar)
 		 */
 		fseek(fp, -1, SEEK_CUR);
 		len--;
-		token[len] = '\0';
+		buf[len] = '\0';
 		break;
 	}
 
 	if (partialMatch != 0) {
-		fprintf(stderr, "Error: Incomplete match: %s\n", token);
-		return (char *)-1;
+		fprintf(stderr, "Error: Incomplete match: %s\n", buf);
+		abort();
 	}
 	if (ferror(fp) != 0) {
 		fprintf(stderr, "File error.\n");
-		return (char *)-1;
+		abort();
 	}
 	if (len == 0) {
 		if (feof(fp) != 0) {
 			return NULL;
 		}
 		fprintf(stderr, "Error: Failed to match next token.\n");
-		return (char *)-1;
+		abort();
 	}
 
-	return strdup(token);
+	Token *token;
+
+	if ((token = malloc(sizeof(*token))) == NULL) {
+		fprintf(stderr, "Can't allocate token: %s\n", strerror(errno));
+		abort();
+	}
+	memset(token, 0, sizeof(*token));
+
+	token->string = strdup(buf);
+	token->type = type;
+	token->line = line;
+
+	return token;
 }
 
-/*
- * -1 An error occurred.
- *  0 Symbol matches token.
- *  1 Symbol doesn't match token.
- */
 static int
-matchSymbol(struct Symbol *symbol, char *token)
+printToken(Token *token, int pretty)
 {
-	if (symbol->type == SYMBOL_TERMINAL) {
-		if (strcmp(token, symbol->token) == 0) {
-			fprintf(stderr, "T:%s\n", token);
-			return 0;
+	char *type = "";
+
+	if (pretty == 0) {
+		fprintf(stderr, "%d: ", token->line);
+		if (token->type == T_TERMINAL) {
+			type = "t:";
 		}
-	} else if (symbol->type == SYMBOL_REFERENCE) {
-		;
-	} else if (symbol->type == SYMBOL_LITERAL) {
-		if (isLiteral(token) == 1) {
-			fprintf(stderr, "L:%s\n", token);
-			return 0;
+		else if (token->type == T_LITERAL) {
+			type = "l:";
 		}
-	} else if (symbol->type == SYMBOL_IDENTIFIER) {
-		if (isIdentifier(token) == 1) {
-			fprintf(stderr, "I:%s\n", token);
-			return 0;
+		else if (token->type == T_IDENTIFIER) {
+			type = "i:";
+		}
+		fprintf(stderr, "%s", type);
+	}
+
+	fprintf(stderr, "%s", token->string);
+
+	if (pretty != 0) {
+		if (!strcmp(token->string, ";") ||
+			!strcmp(token->string, "{") ||
+			!strcmp(token->string, "}")) {
+			fprintf(stderr, "\n");
+		} else {
+			fprintf(stderr, " ");
 		}
 	} else {
-		fprintf(stderr, "Bad symbol type?!\n");
-		return -1;
-	}
-
-	return 1;
-}
-
-/*
- * -1 Encountered an error.
- *  0 Rule matches.
- *  1 Rule does not match.
- */
-static int
-matchRule(struct Grammar *grammar, struct Rule *rule, struct Stack *stack, char ***tokenArray, int tokenCount)
-{
-	int match;
-
-	if (findInStack(stack, rule->name) == 0) {
-		/*
-		 * This rule is already in the rule stack. That means we are
-		 * infinitely recursing without getting closer to matching a
-		 * full rule.
-		 */
-		return 1;
-		
-	}
-	stackPush(stack, rule->name);
-
-	dumpRule(rule);
-
-	int j, k;
-	for (j = 0; j < rule->numStrings; j++) {
-		struct SymbolString *string = &rule->strings[j];
-		char **tokens = *tokenArray;
-		int tokensLeft = tokenCount;
-
-		/*
-		 * Try to match each Symbol within the SymbolString.
-		 */
-		for (k = 0; k < string->numSymbols; k++) {
-			struct Symbol *symbol = &string->symbols[k];
-
-			fprintf(stderr, "Matching token: %s\n", *tokens);
-
-			if (symbol->type == SYMBOL_REFERENCE) {
-				struct Rule *ref;
-				
-				ref = findRuleByName(grammar, symbol->token);
-				match = matchRule(grammar, ref, stack, &tokens, tokensLeft);
-				if (match != 0) {
-					break;
-				}
-
-				/*
-				 * We don't need to advance the tokens array.
-				 * The matchRule() call did that for us.
-				 */
-				continue;
-			}
-
-			/*
-			 * Does symbol match?
-			 */
-			match = matchSymbol(symbol, *tokens);
-			if (match != 0) {
-				break;
-			}
-
-			tokensLeft--;
-			tokens++;
-		}
-
-		if (match < 0) {
-			stackPop(stack);
-			return -1;
-		} else if (match == 0) {
-			/*
-			 * Symbol string matches.
-			 */
-			fprintf(stderr, "Full symbol string matches!\n");
-			*tokenArray = tokens;
-			stackPop(stack);
-			return 0;
-		}
-	}
-
-	stackPop(stack);
-	return 1;
-}
-
-static int
-printSourceToken(char *token)
-{
-	/*
-	 * Pretty print.
-	 */
-	fprintf(stderr, "%s", token);
-	if (!strcmp(token, ";") ||
-		!strcmp(token, "{") ||
-		!strcmp(token, "}")) {
 		fprintf(stderr, "\n");
-	} else {
-		fprintf(stderr, " ");
 	}
 
 	return 0;
 }
 
 static int
-parseSourceFile(char *path, struct Grammar *grammar)
+lexer(char *path, Program *prog)
 {
 	FILE *fp;
-	char *token;
-	char **tokenArray = NULL;
+	Token *token;
+	Token **tokenArray = NULL;
 	int tokenCount = 0;
 
 	if ((fp = fopen(path, "r")) == NULL) {
@@ -1108,11 +592,12 @@ parseSourceFile(char *path, struct Grammar *grammar)
 		return -1;
 	}
 
+	prog->lineCount = 1;
 
-	while (((token = readSourceToken(fp, grammar)) != NULL) &&
-		   (token != (char *)-1)) {
+	while (((token = readToken(fp, prog)) != NULL) &&
+		   (token != (Token *)-1)) {
 
-		printSourceToken(token);
+		//printToken(token, 1);
 
 		/*
 		 * Increase the token array size.
@@ -1127,34 +612,449 @@ parseSourceFile(char *path, struct Grammar *grammar)
 		tokenArray[tokenCount-1] = token;
 	}
 
+	prog->tokenArray = tokenArray;
+	prog->tokenCount = tokenCount;
+	prog->i = -1;
+
 	fprintf(stderr, "Parsed %d tokens.\n", tokenCount);
-	int i;
-	for (i = 0; i < tokenCount; i++) {
-		printSourceToken(tokenArray[i]);
+	while ((token = nextToken(prog)) != NULL) {
+		printToken(token, 0);
 	}
 
-	struct Stack *stack;
+	prog->i = -1;
 
-	if ((stack = stackInit()) == NULL) {
-		return -1;
+	return 0;
+}
+
+void
+printType(Type *type, int newline)
+{
+	printf("%s", type->token->string);
+	if (type->ptr) {
+		printf(" *");
+	}
+	if (newline) {
+		printf("\n");
+	}
+}
+
+void
+printArg(Arg *arg)
+{
+	printType(&arg->type, 0);
+	printf(" %s", arg->name);
+}
+
+void
+printVariable(Variable *var)
+{
+	printType(&var->type, 0);
+	printf(" %s", var->name);
+	if (var->initValue != NULL) {
+		printf(" = %s", var->initValue->string);
+	}
+	printf(";\n");
+}
+
+void
+printStruct(Struct *s)
+{
+	printf("struct %s {\n", s->name);
+	ListEntry *entry = NULL;
+	while (listNext(&s->members, &entry) != NULL) {
+		Arg *arg = entry->data;
+		printArg(arg);
+
+		printf(";\n");
+	}
+	printf("}\n");
+}
+
+void
+printFunction(Function *f)
+{
+	printf("func %s(", f->name);
+
+	ListEntry *entry = NULL;
+	while (listNext(&f->args, &entry) != NULL) {
+		Arg *arg = entry->data;
+		printArg(arg);
+
+		if (entry != f->args.tail) {
+			printf(", ");
+		}
+	}
+	printf(") ");
+
+	printType(&f->type, 0);
+
+	printf(" {\n");
+
+	entry = NULL;
+	while (listNext(&f->statements, &entry) != NULL) {
+		Token *token = entry->data;
+		printToken(token, 1);
 	}
 
-	struct Rule *rule;
+	printf("}\n");
+}
 
-	rule = findRuleByName(grammar, "stmt");
-	matchRule(grammar, rule, stack, &tokenArray, tokenCount);
+/*
+ * == 0 on mismatch
+ * != 0 on match
+ */
+static int
+match(Token *token, char *string)
+{
+	if (strcmp(token->string, string) != 0) {
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * == 0 on mismatch
+ * != 0 on match
+ */
+static int
+isType(Program *p, Token *t)
+{
+	if (match(t, "u8") ||
+		match(t, "u32") ||
+		match(t, "ptr")) {
+		return 1;
+	}
+
+	ListEntry *entry = NULL;
+	while (listNext(&p->structs, &entry) != NULL) {
+		Struct *s = entry->data;
+		if (match(t, s->name)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+typedef struct Type {
+	Token *token;
+	int size;
+	int ptr;
+} Type;
+*/
+
+/*
+ * u8 u32 : Primitive types.
+ *      * : Pointers.
+ *     [] : Array.
+ *
+ * <u8 | u32 | void | <struct>> [*[*]] <ident>;
+ */
+static Type *
+parseType(Program *prog, Type *type)
+{
+	if (type == NULL) {
+		if ((type = malloc(sizeof(*type))) == NULL) {
+			fprintf(stderr, "Can't allocate type object: %s\n", strerror(errno));
+			abort();
+		}
+	}
+	memset(type, 0, sizeof(*type));
+
+	Token *token = nextToken(prog);
+	if (!isType(prog, token)) {
+		fprintf(stderr, "Expected type name but got: %s\n", token->string);
+		abort();
+	}
+	type->token = token;
+
+	return type;
+}
+
+/*
+typedef struct Arg {
+	Type type;
+	char *name;
+} Arg;
+*/
+
+/*
+ * Parse a single argument. If 'arg' is NULL then a new object will
+ * be allocated.
+ */
+static Arg *
+parseArg(Program *prog, Arg *arg)
+{
+	fprintf(stderr, "Parsing argument.\n");
+
+	if (arg == NULL) {
+		if ((arg = malloc(sizeof(*arg))) == NULL) {
+			fprintf(stderr, "Can't allocate Arg object: %s\n", strerror(errno));
+			abort();
+		}
+	}
+	memset(arg, 0, sizeof(*arg));
+
+	parseType(prog, &arg->type);
+
+	Token *token = nextToken(prog);
+	if (token->type != T_IDENTIFIER) {
+		fprintf(stderr, "Expected identifier but got: %s\n", token->string);
+		abort();
+	}
+	arg->name = token->string;
+
+	return arg;
+}
+
+/*
+ * func <ident> ( [ <type> <ident> [ , <type> <ident> ] ] ) [ <type> ] { }
+ *
+ * func foo(u8 a, u32 b, ptr c) void * { }
+ *
+ *  < 0  Error
+ * == 0  Not a function def
+ *  > 0  Parsed function def
+ */
+static Function *
+parseFunction(Program *prog)
+{
+	fprintf(stderr, "Parsing function.\n");
+
+	Token *token = NULL;
+	//int i = prog->i;
+
+	Function *func = NULL;
+	if ((func = malloc(sizeof(*func))) == NULL) {
+		fprintf(stderr, "Can't allocate func object: %s\n", strerror(errno));
+		abort();
+	}
+	memset(func, 0, sizeof(*func));
+
+	token = nextToken(prog);
+	if (token->type != T_IDENTIFIER) {
+		fprintf(stderr, "Expected function name but got: %s\n", token->string);
+		abort();
+	}
+	func->name = token->string;
+
+	token = nextToken(prog);
+	if (!match(token, "(")) {
+		fprintf(stderr, "Expected ( but got: %s\n", token->string);
+		abort();
+	}
+
+	token = nextToken(prog);
+	while (!match(token, ")")) {
+		prog->i--;
+		Arg *arg = parseArg(prog, NULL);
+		listAppend(&func->args, arg);
+
+		token = nextToken(prog);
+		if (match(token, ",")) {
+			token = nextToken(prog);
+		}
+	}
+
+	token = nextToken(prog);
+	if (!match(token, "{")) {
+		prog->i--;
+		parseType(prog, &func->type);
+	}
+
+	token = nextToken(prog);
+	if (!match(token, "{")) {
+		fprintf(stderr, "Expected { but got: %s\n", token->string);
+		abort();
+	}
+
+	int braceStack = 0;
+	while ((token = nextToken(prog)) != NULL) {
+		if (match(token, "{")) {
+			braceStack++;
+		}
+		if (match(token, "}")) {
+			if (braceStack == 0) {
+				break;
+			}
+			braceStack--;
+		}
+		listAppend(&func->statements, token);
+	}
+
+	return func;
+}
+
+void
+error(int line, const char *fmt, ...) {
+	va_list args;
+
+	va_start(args, fmt);
+	fprintf(stderr, "Line %d: ", line);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+
+	abort();
+}
+
+static Variable *
+parseVariable(Program *prog)
+{
+	fprintf(stderr, "Parsing variable.\n");
+
+	Token *token = NULL;
+
+	Variable *var = NULL;
+	if ((var = malloc(sizeof(*var))) == NULL) {
+		fprintf(stderr, "Can't allocate var object: %s\n", strerror(errno));
+		abort();
+	}
+	memset(var, 0, sizeof(*var));
+
+	parseType(prog, &var->type);
+
+	token = nextToken(prog);
+	if (token->type != T_IDENTIFIER) {
+		error(token->line, "Expected variable name but got: %s\n", token->string);
+	}
+	var->name = token->string;
+
+	token = nextToken(prog);
+	if (match(token, "=")) {
+		/*
+		 * Initialize variable to literal.
+		 */
+		token = nextToken(prog);
+		printToken(token, 0);
+		if (token->type != T_LITERAL) {
+			error(token->line, "Variables can only be initialized to literals,"
+			      " but got: %s", token->string);
+		}
+		var->initValue = token;
+		token = nextToken(prog);
+		printToken(token, 0);
+	}
+	
+	if (!match(token, ";")) {
+		error(token->line, "Expected ; but got: %s\n", token->string);
+	}
+
+	return var;
+}
+
+static Struct *
+parseStruct(Program *prog)
+{
+	fprintf(stderr, "Parsing struct.\n");
+
+	Token *token = NULL;
+
+	Struct *s = NULL;
+	if ((s = malloc(sizeof(*s))) == NULL) {
+		fprintf(stderr, "Can't allocate var object: %s\n", strerror(errno));
+		abort();
+	}
+	memset(s, 0, sizeof(*s));
+
+	token = nextToken(prog);
+	if (token->type != T_IDENTIFIER) {
+		fprintf(stderr, "Expected struct name but got: %s\n", token->string);
+		abort();
+	}
+	s->name = token->string;
+
+	token = nextToken(prog);
+	if (!match(token, "{")) {
+		fprintf(stderr, "Expected { but got: %s\n", token->string);
+		abort();
+	}
+
+	token = nextToken(prog);
+	while (!match(token, "}")) {
+		prog->i--;
+		Arg *arg = parseArg(prog, NULL);
+		listAppend(&s->members, arg);
+
+		token = nextToken(prog);
+		if (!match(token, ";")) {
+			error(token->line, "Expected ; but got: %s\n", token->string);
+		}
+		token = nextToken(prog);
+	}
+
+	return s;
+}
+
+static int
+parser(Program *prog)
+{
+	Token *token;
+	while ((token = nextToken(prog)) != NULL) {
+		fprintf(stderr, "Checking: %s\n", token->string);
+		/*
+		 * At global scope:
+		 * 
+		 *  Function definition
+		 *    func <type> <ident> ( [ <type> <name> [ , <type> <name> ] ] ) <type> { }
+		 *  Struct definition
+		 *    struct <ident> {
+		 *      <type> <ident>,
+		 *      <type> <ident>
+		 *    };
+		 *  Variable declaration (initialize to constant)
+		 *    <type> <ident> [ = <literal> ];
+		 */
+
+		if (match(token, "func")) {
+			Function *func = parseFunction(prog);
+			listAppend(&prog->functions, func);
+		}
+		else if (match(token, "struct")) {
+			Struct *s = parseStruct(prog);
+			listAppend(&prog->structs, s);
+		}
+		else if (isType(prog, token)) {
+			prog->i--;
+			Variable *var = parseVariable(prog);
+			listAppend(&prog->vars, var);
+		} else {
+			fprintf(stderr, "Unexpected symbol: %s\n", token->string);
+			abort();
+		}
+	}
 
 	return 0;
 }
 
 int main(int argc, char **argv)
 {
-	struct Grammar *grammar;
+	Program prog;
+	memset(&prog, 0, sizeof(prog));
 
-	parseArgs(argc, argv);
+	mainArgs(argc, argv);
 
-	grammar = loadGrammar(grammarFile);
-	parseSourceFile(file, grammar);
+	lexer(file, &prog);
+	parser(&prog);
+
+	ListEntry *entry;
+
+	entry = NULL;
+	while (listNext(&prog.vars, &entry) != NULL) {
+		Variable *var = entry->data;
+		printVariable(var);
+	}
+
+	entry = NULL;
+	while (listNext(&prog.structs, &entry) != NULL) {
+		Struct *s = entry->data;
+		printStruct(s);
+	}
+
+	entry = NULL;
+	while (listNext(&prog.functions, &entry) != NULL) {
+		Function *f = entry->data;
+		printFunction(f);
+	}
 
 	return 0;
 }

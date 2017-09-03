@@ -1,3 +1,40 @@
+------------------------------------------------------------------------
+
+This project's goal is to design a custom CPU
+
+Instruction Set
+Assembly Language
+Compiled Language
+
+Verilog FPGA Implemenation
+
+Processor
+
+24 Instructions
+16 Registers
+
+Assembly Language
+
+Assembler
+Emulator
+Debugger
+
+doc/   - Technical documention describing all aspects of this project.
+progs/ - Programs written to run on the CPU.
+hdl/   - Hardware to run 
+
+
+Arithmetic:      7 add,sub,adc,sbc,mul,div,cmp
+Load/Store/Move: 5 ldw,ldb,stw,stb,mov
+Bitwise:         6 and,or,xor,nor,lsl,lsr
+Jumps:           5 jmp,jz,jnz,jl,jge
+Other:           1 die,nop
+                --
+				24
+
+die
+
+
 #
 # Install dependencies.
 #
@@ -32,3 +69,4 @@ sudo apt-get install libncurses5 libncurses5-dev
 # Dump heap contents in human readable format.
 #
 ./heap -m emulator.memory -o 0x10000 -z $(( 0x1FF0000 )) -s
+

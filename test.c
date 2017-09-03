@@ -2,7 +2,7 @@
 struct bob {
 	u32 a;
 	u32 c;
-}
+};
 
 // Define function
 u32 inc(int *a)
