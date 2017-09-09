@@ -87,7 +87,7 @@ mainArgs(int argc, char **argv)
 	}
 
 	if (file == NULL) {
-		fprintf(stderr, "Expected a source file path.\n");
+		fprintf(stderr, "Error: Expected a source file path.\n");
 		exit(1);
 	}
 }
@@ -147,6 +147,7 @@ typedef struct Token {
 	int id;
 	int type;
 	int line;
+	void *private;
 } Token;
 
 typedef struct Type {
@@ -209,6 +210,69 @@ typedef struct Program {
 	// Function
 	List functions;
 } Program;
+
+void
+fatal(const char *fmt, ...)
+{
+	va_list args;
+
+	fprintf(stderr, "%s(): Error: ", __func__);
+
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+
+	abort();
+}
+
+#define ERROR_CONTEXT 5
+
+void
+error(Token *token, const char *fmt, ...)
+{
+	va_list args;
+
+	/*
+	 * Print lines of context.
+	 */
+	fprintf(stderr, "Source context:\n");
+
+	Program *prog = token->private;
+	int first = token->line - (ERROR_CONTEXT / 2);
+	if (first < 0) {
+		first = 0;
+	}
+	int last = first + ERROR_CONTEXT;
+	int currentLine = first - 1;
+	int i;
+	for (i = 0; i < prog->tokenCount; i++) {
+		Token *thisToken = prog->tokenArray[i];
+		if (thisToken->line >= last) {
+			break;
+		}
+		if (thisToken->line >= first) {
+			if (thisToken->line > currentLine) {
+				while (thisToken->line > currentLine) {
+					fprintf(stderr, "\n");
+					currentLine++;
+					fprintf(stderr, " %4d: ", currentLine);
+				}
+			}
+			fprintf(stderr, "%s ", thisToken->string);
+		}
+	}
+	fprintf(stderr, "\n\n");
+
+	fprintf(stderr, "Line %d: ", token->line);
+
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+
+	fprintf(stderr, "  Token: %s\n", token->string);
+
+	abort();
+}
 
 static Token *
 nextToken(Program *prog, int abortOnNull)
@@ -382,8 +446,7 @@ isLiteral(char *token, int *type)
 	int ret = 0;
 
 	if (type == NULL) {
-		fprintf(stderr, "Invalid argument?!\n");
-		abort();
+		fatal("Invalid argument.");
 	}
 	*type = 0;
 
@@ -494,8 +557,7 @@ readToken(FILE *fp, Program *prog)
 			 * Skip over multiline comment.
 			 */
 			if (readUntil(prog, fp, "*/") < 0) {
-				fprintf(stderr, "Error: Failed to read until '*/'\n");
-				abort();
+				fatal("Failed to read until '*/'\n");
 			}
 			len = 0;
 			memset(buf, 0, sizeof(buf));
@@ -506,8 +568,7 @@ readToken(FILE *fp, Program *prog)
 			 * Skip over single line comment.
 			 */
 			if (readUntil(prog, fp, "\n") < 0) {
-				fprintf(stderr, "Error: Failed to read until '\\n'\n");
-				abort();
+				fatal("Failed to read until '\\n'\n");
 			}
 			len = 0;
 			memset(buf, 0, sizeof(buf));
@@ -553,32 +614,29 @@ readToken(FILE *fp, Program *prog)
 	}
 
 	if (partialMatch != 0) {
-		fprintf(stderr, "Error: Incomplete match: %s\n", buf);
-		abort();
+		fatal("Incomplete match: %s\n", buf);
 	}
 	if (ferror(fp) != 0) {
-		fprintf(stderr, "File error.\n");
-		abort();
+		fatal("File error.\n");
 	}
 	if (len == 0) {
 		if (feof(fp) != 0) {
 			return NULL;
 		}
-		fprintf(stderr, "Error: Failed to match next token.\n");
-		abort();
+		fatal("Failed to match next token.\n");
 	}
 
 	Token *token;
 
 	if ((token = malloc(sizeof(*token))) == NULL) {
-		fprintf(stderr, "Can't allocate token: %s\n", strerror(errno));
-		abort();
+		fatal("Can't allocate token: %s\n", strerror(errno));
 	}
 	memset(token, 0, sizeof(*token));
 
 	token->string = strdup(buf);
 	token->type = type;
 	token->line = line;
+	token->private = prog;
 
 	return token;
 }
@@ -599,8 +657,7 @@ printToken(Token *token, int pretty)
 		else if (token->type == T_IDENTIFIER) {
 			type = "i";
 		} else {
-			fprintf(stderr, "Token does not have a valid type?! %s\n", token->string);
-			abort();
+			fatal("Token does not have a valid type?! %s\n", token->string);
 		}
 		fprintf(stderr, "%s: ", type);
 	}
@@ -631,8 +688,7 @@ lexer(char *path, Program *prog)
 	int tokenCount = 0;
 
 	if ((fp = fopen(path, "r")) == NULL) {
-		fprintf(stderr, "Can't open %s: %s\n", path, strerror(errno));
-		return -1;
+		fatal("Can't open %s: %s\n", path, strerror(errno));
 	}
 
 	prog->lineCount = 1;
@@ -648,8 +704,8 @@ lexer(char *path, Program *prog)
 		tokenCount++;
 		tokenArray = realloc(tokenArray, sizeof(*tokenArray) * tokenCount);
 		if (tokenArray == NULL) {
-			fprintf(stderr, "Can't grow tokenArray: %s\n", strerror(errno));
-			return -1;
+			fatal("Can't grow tokenArray: %s\n", strerror(errno));
+			abort();
 		}
 
 		tokenArray[tokenCount-1] = token;
@@ -660,7 +716,7 @@ lexer(char *path, Program *prog)
 	prog->i = -1;
 
 	while ((token = nextToken(prog, 0)) != NULL) {
-		printToken(token, 0);
+		printToken(token, 1);
 	}
 	fprintf(stderr, "Read %d tokens on %d lines.\n",
 			tokenCount, tokenArray[tokenCount-1]->line);
@@ -779,19 +835,6 @@ isType(Program *p, Token *t)
 	return 0;
 }
 
-void
-error(int line, const char *fmt, ...)
-{
-	va_list args;
-
-	va_start(args, fmt);
-	fprintf(stderr, "Line %d: ", line);
-	vfprintf(stderr, fmt, args);
-	va_end(args);
-
-	abort();
-}
-
 /*
 typedef struct Type {
 	Token *token;
@@ -812,16 +855,14 @@ parseType(Program *prog, Type *type, int allowArray)
 {
 	if (type == NULL) {
 		if ((type = malloc(sizeof(*type))) == NULL) {
-			fprintf(stderr, "Can't allocate type object: %s\n", strerror(errno));
-			abort();
+			fatal("Can't allocate type object: %s\n", strerror(errno));
 		}
 	}
 	memset(type, 0, sizeof(*type));
 
 	Token *token = nextToken(prog, 1);
 	if (!isType(prog, token)) {
-		fprintf(stderr, "Expected type name but got: %s\n", token->string);
-		abort();
+		error(token, "Expected type name.\n");
 	}
 	type->token = token;
 
@@ -832,12 +873,11 @@ parseType(Program *prog, Type *type, int allowArray)
 		 */
 		token = nextToken(prog, 1);
 		if ((token->type & (T_LITERAL_HEX | T_LITERAL_DEC)) == 0) {
-			error(token->line, "Array size must be numerical literal but got: %s\n",
-			      token->string);
+			error(token, "Array size must be numerical literal.\n");
 		}
 		token = nextToken(prog, 1);
 		if (!match(token, "]")) {
-			error(token->line, "Expected closing ] but got: %s\n", token->string);
+			error(token, "Expected closing ]\n");
 		}
 	} else if (match(token, "*")) {
 		/*
@@ -876,8 +916,7 @@ parseArg(Program *prog, Arg *arg)
 
 	if (arg == NULL) {
 		if ((arg = malloc(sizeof(*arg))) == NULL) {
-			fprintf(stderr, "Can't allocate Arg object: %s\n", strerror(errno));
-			abort();
+			fatal("Can't allocate Arg object: %s\n", strerror(errno));
 		}
 	}
 	memset(arg, 0, sizeof(*arg));
@@ -886,8 +925,7 @@ parseArg(Program *prog, Arg *arg)
 
 	Token *token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
-		fprintf(stderr, "Expected identifier but got: %s\n", token->string);
-		abort();
+		error(token, "Expected identifier.\n");
 	}
 	arg->name = token->string;
 
@@ -913,22 +951,19 @@ parseFunction(Program *prog)
 
 	Function *func = NULL;
 	if ((func = malloc(sizeof(*func))) == NULL) {
-		fprintf(stderr, "Can't allocate func object: %s\n", strerror(errno));
-		abort();
+		fatal("Can't allocate func object: %s\n", strerror(errno));
 	}
 	memset(func, 0, sizeof(*func));
 
 	token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
-		fprintf(stderr, "Expected function name but got: %s\n", token->string);
-		abort();
+		error(token, "Expected function name.\n");
 	}
 	func->name = token->string;
 
 	token = nextToken(prog, 1);
 	if (!match(token, "(")) {
-		fprintf(stderr, "Expected ( but got: %s\n", token->string);
-		abort();
+		error(token, "Expected (\n");
 	}
 
 	token = nextToken(prog, 1);
@@ -939,6 +974,9 @@ parseFunction(Program *prog)
 
 		token = nextToken(prog, 1);
 		if (match(token, ",")) {
+			if (match(token, ")")) {
+				error(token, "In funtion header, expected )\n");
+			}
 			token = nextToken(prog, 1);
 		}
 	}
@@ -951,7 +989,7 @@ parseFunction(Program *prog)
 
 	token = nextToken(prog, 1);
 	if (!match(token, "{")) {
-		fprintf(stderr, "Expected { but got: %s\n", token->string);
+		error(token, "After function header, expected {\n");
 		abort();
 	}
 
@@ -981,8 +1019,7 @@ parseVariable(Program *prog)
 
 	Variable *var = NULL;
 	if ((var = malloc(sizeof(*var))) == NULL) {
-		fprintf(stderr, "Can't allocate var object: %s\n", strerror(errno));
-		abort();
+		fatal("Can't allocate var object: %s\n", strerror(errno));
 	}
 	memset(var, 0, sizeof(*var));
 
@@ -990,7 +1027,7 @@ parseVariable(Program *prog)
 
 	token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
-		error(token->line, "Expected variable name but got: %s\n", token->string);
+		error(token, "Expected variable name.\n");
 	}
 	var->name = token->string;
 
@@ -1002,15 +1039,14 @@ parseVariable(Program *prog)
 		token = nextToken(prog, 1);
 		printf("0x%x\n", token->type);
 		if ((token->type & T_LITERAL) == 0) {
-			error(token->line, "Variables can only be initialized to literals,"
-			      " but got: %s\n", token->string);
+			error(token, "Variables can only be initialized to literals.\n");
 		}
 		var->initValue = token;
 		token = nextToken(prog, 1);
 	}
 	
 	if (!match(token, ";")) {
-		error(token->line, "Expected ; but got: %s\n", token->string);
+		error(token, "Expected ;\n");
 	}
 
 	return var;
@@ -1025,22 +1061,19 @@ parseStruct(Program *prog)
 
 	Struct *s = NULL;
 	if ((s = malloc(sizeof(*s))) == NULL) {
-		fprintf(stderr, "Can't allocate var object: %s\n", strerror(errno));
-		abort();
+		fatal("Can't allocate var object: %s\n", strerror(errno));
 	}
 	memset(s, 0, sizeof(*s));
 
 	token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
-		fprintf(stderr, "Expected struct name but got: %s\n", token->string);
-		abort();
+		error(token, "Expected struct name.\n");
 	}
 	s->name = token->string;
 
 	token = nextToken(prog, 1);
 	if (!match(token, "{")) {
-		fprintf(stderr, "Expected { but got: %s\n", token->string);
-		abort();
+		error(token, "Expected {\n");
 	}
 
 	token = nextToken(prog, 1);
@@ -1051,7 +1084,7 @@ parseStruct(Program *prog)
 
 		token = nextToken(prog, 1);
 		if (!match(token, ";")) {
-			error(token->line, "Expected ; but got: %s\n", token->string);
+			error(token, "Expected ;\n");
 		}
 		token = nextToken(prog, 1);
 	}
@@ -1064,7 +1097,6 @@ parser(Program *prog)
 {
 	Token *token;
 	while ((token = nextToken(prog, 0)) != NULL) {
-		fprintf(stderr, "Checking: %s\n", token->string);
 		/*
 		 * At global scope:
 		 * 
@@ -1092,8 +1124,7 @@ parser(Program *prog)
 			Variable *var = parseVariable(prog);
 			listAppend(&prog->vars, var);
 		} else {
-			fprintf(stderr, "Unexpected symbol: %s\n", token->string);
-			abort();
+			error(token, "Only 'func', 'struct' and variables are allowed in global scope.\n");
 		}
 	}
 
