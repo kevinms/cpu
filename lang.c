@@ -5,7 +5,8 @@ u8 bar = '\'';
 u8 *bar = "a\\  \"bcd";
 u8 bar = 0xDEAD;
 
-u8 bar = bar;
+// Variables can only be initialized to literals.
+//u8 bar = bar;
 
 struct Foo {
 	u8 foo;
@@ -18,8 +19,9 @@ Foo bob;
  * Add things.
  * Return something.
  */
-func add(u8 a, u8 b) u8 {
-	return a + b;
+func add(u8 a, u8 *b) u8 {
+	b[2] = 42;
+	return a + *b;
 }
 
 // Bob

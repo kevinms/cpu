@@ -2,15 +2,15 @@
 struct bob {
 	u32 a;
 	u32 c;
-};
+}
 
 // Define function
-u32 inc(int *a)
+func inc(u32 *a) u32
 {
 	return (*a + 1);
 }
 
-u32 main()
+func main() u32
 {
 	u32 *a;      // Define pointer
 	u32 b = (1); // Define and initialize

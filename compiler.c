@@ -11,17 +11,20 @@
 
 #include "list.h"
 
-static char *file;
+static char *inFile;
+static char *outFile;
 static int dumpParseTree;
 
 static struct option longopts[] = {
 	{"help", no_argument, NULL, 'h'},
 	{"parse-tree", no_argument, NULL, 'p'},
+	{"output", required_argument, NULL, 'o'},
 };
 
 static char *optdesc[] = {
 	"This help.",
 	"Dump parse tree.",
+	"Name of file to write compiled output to.",
 };
 
 static char *optstring = NULL;
@@ -75,6 +78,9 @@ mainArgs(int argc, char **argv)
 			case 'p':
 				dumpParseTree = 1;
 				break;
+			case 'o':
+				outFile = strdup(optarg);
+				break;
 			case '?':
 				break;
 			default:
@@ -83,11 +89,15 @@ mainArgs(int argc, char **argv)
 	}
 
 	if (optind < argc) {
-		file = strdup(argv[optind]);
+		inFile = strdup(argv[optind]);
 	}
 
-	if (file == NULL) {
+	if (inFile == NULL) {
 		fprintf(stderr, "Error: Expected a source file path.\n");
+		exit(1);
+	}
+	if (outFile == NULL) {
+		fprintf(stderr, "Error: Expected an output file path.\n");
 		exit(1);
 	}
 }
@@ -150,10 +160,35 @@ typedef struct Token {
 	void *private;
 } Token;
 
+typedef struct Struct {
+	char *name;
+	int size;
+
+	// Arg
+	List members;
+} Struct;
+
+#define TYPE_U8 0x1
+#define TYPE_U32 0x2
+#define TYPE_STRUCT 0x4
+#define TYPE_PTR 0x8
+
+/*
+ * Arrays are just pointers to a region of memory.
+ * This type isn't really necessary.
+ * We do need someway to keep track of the array size.
+ */
+#define TYPE_ARRAY 0x10
+
 typedef struct Type {
 	Token *token;
+
+	int flags;
 	int size;
-	int ptr;
+
+	int ptrCount;
+	int arraySize;
+	Struct *structType;
 } Type;
 
 typedef struct Arg {
@@ -165,7 +200,7 @@ typedef struct Variable {
 	Type type;
 	char *name;
 	int address;
-	Token *initValue;
+	Token *value;
 } Variable;
 
 typedef struct Statement {
@@ -183,13 +218,6 @@ typedef struct Function {
 	// Statement
 	List statements;
 } Function;
-
-typedef struct Struct {
-	char *name;
-
-	// Arg
-	List members;
-} Struct;
 
 typedef struct Program {
 	/*
@@ -209,6 +237,8 @@ typedef struct Program {
 
 	// Function
 	List functions;
+
+	FILE *outFP;
 } Program;
 
 void
@@ -726,37 +756,42 @@ lexer(char *path, Program *prog)
 	return 0;
 }
 
-void
+static void
 printType(Type *type, int newline)
 {
+	int i;
+
 	printf("%s", type->token->string);
-	if (type->ptr) {
-		printf(" *");
+	if (type->flags & TYPE_PTR) {
+		printf(" ");
+		for (i = 0; i < type->ptrCount; i++) {
+			printf("*");
+		}
 	}
 	if (newline) {
 		printf("\n");
 	}
 }
 
-void
+static void
 printArg(Arg *arg)
 {
 	printType(&arg->type, 0);
 	printf(" %s", arg->name);
 }
 
-void
+static void
 printVariable(Variable *var)
 {
 	printType(&var->type, 0);
 	printf(" %s", var->name);
-	if (var->initValue != NULL) {
-		printf(" = %s", var->initValue->string);
+	if (var->value != NULL) {
+		printf(" = %s", var->value->string);
 	}
 	printf(";\n");
 }
 
-void
+static void
 printStruct(Struct *s)
 {
 	printf("struct %s {\n", s->name);
@@ -770,7 +805,7 @@ printStruct(Struct *s)
 	printf("}\n");
 }
 
-void
+static void
 printFunction(Function *f)
 {
 	printf("func %s(", f->name);
@@ -820,8 +855,7 @@ static int
 isType(Program *p, Token *t)
 {
 	if (match(t, "u8") ||
-		match(t, "u32") ||
-		match(t, "ptr")) {
+		match(t, "u32")) {
 		return 1;
 	}
 
@@ -833,6 +867,35 @@ isType(Program *p, Token *t)
 		}
 	}
 	return 0;
+}
+
+static int
+getTypeInfo(Program *p, Type *type)
+{
+	if (match(type->token, "u8")) {
+		type->size = 1;
+		type->flags = TYPE_U8;
+		return 0;
+	}
+	if (match(type->token, "u32")) {
+		type->size = 4;
+		type->flags = TYPE_U32;
+		return 0;
+	}
+
+	ListEntry *entry = NULL;
+	while (listNext(&p->structs, &entry) != NULL) {
+		Struct *s = entry->data;
+		if (match(type->token, s->name)) {
+			type->size = s->size;
+			type->flags = TYPE_STRUCT;
+			type->structType = s;
+			return 0;
+		}
+	}
+
+	error(type->token, "Type info of something that is not a type?!\n");
+	return -1;
 }
 
 /*
@@ -866,6 +929,8 @@ parseType(Program *prog, Type *type, int allowArray)
 	}
 	type->token = token;
 
+	getTypeInfo(prog, type);
+
 	token = nextToken(prog, 1);
 	if (allowArray && match(token, "[")) {
 		/*
@@ -875,25 +940,31 @@ parseType(Program *prog, Type *type, int allowArray)
 		if ((token->type & (T_LITERAL_HEX | T_LITERAL_DEC)) == 0) {
 			error(token, "Array size must be numerical literal.\n");
 		}
+		type->arraySize = strtoul(token->string, NULL, 0);
 		token = nextToken(prog, 1);
 		if (!match(token, "]")) {
 			error(token, "Expected closing ]\n");
 		}
+		type->flags |= TYPE_PTR;
 	} else if (match(token, "*")) {
 		/*
 		 * Pointer.
 		 */
+		type->ptrCount = 1;
 		token = nextToken(prog, 1);
 		while (match(token, "*")) {
 			token = nextToken(prog, 1);
+			type->ptrCount++;
 		}
 		prog->i--;
+		type->flags |= TYPE_PTR;
 	} else {
 		/*
 		 * Oops, guess we didn't need the token.
 		 */
 		prog->i--;
 	}
+
 
 	return type;
 }
@@ -931,6 +1002,15 @@ parseArg(Program *prog, Arg *arg)
 
 	return arg;
 }
+
+#if 0
+static Statement *
+parseStatement(Program *prog, Token *token)
+{
+
+	return NULL;
+}
+#endif
 
 /*
  * func <ident> ( [ <type> <ident> [ , <type> <ident> ] ] ) [ <type> ] { }
@@ -1004,6 +1084,7 @@ parseFunction(Program *prog)
 			}
 			braceStack--;
 		}
+		//TODO: Actually finish parsing the statements in a function.
 		listAppend(&func->statements, token);
 	}
 
@@ -1041,7 +1122,7 @@ parseVariable(Program *prog)
 		if ((token->type & T_LITERAL) == 0) {
 			error(token, "Variables can only be initialized to literals.\n");
 		}
-		var->initValue = token;
+		var->value = token;
 		token = nextToken(prog, 1);
 	}
 	
@@ -1131,14 +1212,172 @@ parser(Program *prog)
 	return 0;
 }
 
-int main(int argc, char **argv)
+static int
+escapeSequence(char c)
+{
+	if (c == 'n') {
+		return '\n';
+	}
+	if (c == 't') {
+		return '\t';
+	}
+	if (c == '"') {
+		return '"';
+	}
+	if (c == '\'') {
+		return '\'';
+	}
+	if (c == '\\') {
+		return '\\';
+	}
+
+	fatal("Invalid escape sequence?!\n");
+	return -1;
+}
+
+static uint32_t nextStrLabelNum = 0;
+
+static int
+genLiteralStr(Program *prog, Token *token)
+{
+	int i;
+
+	if (token->type != T_LITERAL_STR) {
+		return 0;
+	}
+
+	token->id = nextStrLabelNum;
+	nextStrLabelNum++;
+
+	fprintf(prog->outFP, ".str_%" PRIu32 "\n", token->id);
+
+	for (i = 0; i < strlen(token->string); i++) {
+		int c = token->string[i];
+		if (c == '"') {
+			continue;
+		}
+		if (c == '\\') {
+			/*
+			 * Escape sequence.
+			 */
+			i++;
+			c = token->string[i];
+			fprintf(prog->outFP, "b %d\n", escapeSequence(c));
+		}
+		fprintf(prog->outFP, "b %d\n", c);
+	}
+
+	return 0;
+}
+
+static int
+literalCharToNum(Program *prog, char *string)
+{
+	if (string[1] == '\\') {
+		/*
+		 * Escape sequence.
+		 */
+		return escapeSequence(string[2]);
+	}
+	return string[1];
+}
+
+static int
+genVariable(Program *prog, Variable *var)
+{
+	int i;
+
+	/*
+	 * Throw down a label so others can easily reference the variable.
+	 */
+	fprintf(prog->outFP, ".v_%s\n", var->name);
+
+	/*
+	 * struct	can't be initialized
+	 * u8		hex|dec|char
+	 * u32		hex|dec|char
+	 * ptr		hex|dec|char|string
+	 */
+
+	if (var->value) {
+		if (var->type.flags & TYPE_STRUCT) {
+			error(var->value, "Structs can't be initialized!\n");
+		}
+		if (var->value->type == T_LITERAL_STR) {
+			if ((var->type.flags & TYPE_PTR) == 0) {
+				error(var->value, "Only pointers can be assigned to a string literal!\n");
+			}
+			fprintf(prog->outFP, "w .str_%" PRIu32 "\n", var->value->id);
+		}
+		if (var->value->type & (T_LITERAL_HEX | T_LITERAL_DEC)) {
+			if (var->type.flags & TYPE_U8) {
+				fprintf(prog->outFP, "b %s\n", var->value->string);
+			} else if (var->type.flags & (TYPE_U32 | TYPE_PTR)) {
+				fprintf(prog->outFP, "w %s\n", var->value->string);
+			}
+		}
+		if (var->value->type & T_LITERAL_CHR) {
+			if (var->type.flags & TYPE_U8) {
+				fprintf(prog->outFP, "b %d\n", literalCharToNum(prog, var->value->string));
+			} else if (var->type.flags & (TYPE_U32 | TYPE_PTR)) {
+				fprintf(prog->outFP, "w %d\n", literalCharToNum(prog, var->value->string));
+			}
+		}
+	} else {
+		/*
+		 * By default, global variables are initialized to zero.
+		 */
+		for (i = 0; i < var->type.size / 4; i++)
+			fprintf(prog->outFP, "w 0\n");
+		for (i = 0; i < var->type.size % 4; i++)
+			fprintf(prog->outFP, "b 0\n");
+	}
+	
+	return 0;
+}
+
+static int
+generate(Program *prog)
+{
+	ListEntry *entry = NULL;
+
+	if ((prog->outFP = fopen(outFile, "w")) == NULL) {
+		fatal("Can't open %s: %s\n", outFile, strerror(errno));
+	}
+
+	fprintf(prog->outFP, "jmp .__main\n");
+
+	/*
+	 * Generate code for all string literals.
+	 */
+	prog->i = -1;
+	Token *token;
+	while ((token = nextToken(prog, 0)) != NULL) {
+		if (token->type == T_LITERAL_STR) {
+			genLiteralStr(prog, token);
+		}
+	}
+
+	/*
+	 * Generate code for all global variables.
+	 */
+	while (listNext(&prog->vars, &entry) != NULL) {
+		Variable *var = entry->data;
+		genVariable(prog, var);
+	}
+
+	return 0;
+}
+
+int
+main(int argc, char **argv)
 {
 	Program prog;
 	memset(&prog, 0, sizeof(prog));
 
 	mainArgs(argc, argv);
 
-	lexer(file, &prog);
+	lexer(inFile, &prog);
 	parser(&prog);
 
 	ListEntry *entry;
@@ -1160,6 +1399,8 @@ int main(int argc, char **argv)
 		Function *f = entry->data;
 		printFunction(f);
 	}
+
+	generate(&prog);
 
 	return 0;
 }
