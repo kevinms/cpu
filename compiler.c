@@ -1163,6 +1163,8 @@ parseStruct(Program *prog)
 		Arg *arg = parseArg(prog, NULL);
 		listAppend(&s->members, arg);
 
+		s->size += arg->type.size;
+
 		token = nextToken(prog, 1);
 		if (!match(token, ";")) {
 			error(token, "Expected ;\n");
