@@ -107,6 +107,8 @@ def loadLabels(source):
 			export = True
 			tokens = tokens[1:]
 		if tokens[0][0] == '.':
+			if tokens[0][1:] in labels:
+				error('line '+str(line)+': A label named '+tokens[0][1:]+' already exists.')
 			if len(tokens) > 2:
 				error('line '+str(line)+': Invalid label syntax, too many tokens.')
 			elif len(tokens) > 1:

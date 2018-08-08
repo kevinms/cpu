@@ -10,6 +10,184 @@
 #include <getopt.h>
 
 #include "list.h"
+#include "lifo.h"
+
+char *operatorSymbols[] = {
+	"|","&","^",
+	"||","&&",
+	"+","-","*","/","%",
+	"==","!=","<",">","<=",">=",
+	"~",
+	"!",
+	"-",
+	"=",
+	".","->",
+	"@",
+	"[","]","(",")"
+};
+#define NUM_OPERATOR_SYMBOLS (sizeof(operatorSymbols) / sizeof(*operatorSymbols))
+
+char *symbols[] = {
+	"|","&","^",
+	"||","&&",
+	"+","-","*","/","%",
+	"==","!=","<",">","<=",">=",
+	"~",
+	"!",
+	"-",
+	"=",
+	".","->",
+	"@",
+	"[","]","(",")",",",
+	"u8","u32","void",
+	"struct",
+	";","{","}",
+	"if","else",
+	"while","for","break","continue",
+	"return",
+	"sizeof"
+};
+#define NUM_SYMBOLS (sizeof(symbols) / sizeof(*symbols))
+
+#define T_TERMINAL    0x1
+#define T_IDENTIFIER  0x2
+#define T_LITERAL_HEX 0x4
+#define T_LITERAL_DEC 0x8
+#define T_LITERAL_STR 0x10
+#define T_LITERAL_CHR 0x20
+#define T_LITERAL (T_LITERAL_HEX | T_LITERAL_DEC | T_LITERAL_STR | T_LITERAL_CHR)
+
+typedef struct Token {
+	char *string;
+	int id;
+	int type;
+	int line;
+	void *private;
+} Token;
+
+typedef struct Struct {
+	char *name;
+	int size;
+
+	// Parameter
+	List members;
+} Struct;
+
+#define TYPE_U8 0x1
+#define TYPE_U32 0x2
+#define TYPE_STRUCT 0x4
+#define TYPE_PTR 0x8
+
+/*
+ * Arrays are just pointers to a region of memory.
+ * This type isn't really necessary.
+ * We do need someway to keep track of the array size.
+ */
+#define TYPE_ARRAY 0x10
+
+typedef struct Type {
+	Token *token;
+
+	int flags;
+	int size;
+
+	int ptrCount;
+	int arraySize;
+	Struct *structType;
+} Type;
+
+typedef struct Parameter {
+	Type type;
+	char *name;
+} Parameter;
+
+typedef struct Variable {
+	Type type;
+	char *name;
+	int address;
+	Token *value;
+} Variable;
+
+#define EXPR_OPERATOR 0x1
+#define EXPR_LITERAL 0x2
+#define EXPR_VAR 0x4
+#define EXPR_FUNC 0x8
+#define EXPR_OPERAND (EXPR_LITERAL | EXPR_VAR | EXPR_FUNC)
+
+#define ASSOC_LEFT_TO_RIGHT 1
+#define ASSOC_RIGHT_TO_LEFT 2
+
+/*
+ * <operand> := <variable> | <func>
+ * <operator> := <math symbol>
+ */
+typedef struct Oper {
+	int flags;
+	Token *token;
+
+	int isBinary;
+	int precedence;
+	int associativity;
+} Oper;
+
+typedef struct Expression {
+	// Oper
+	List postfix;
+} Expression;
+
+#define STMT_IF 0x1
+#define STMT_ELIF 0x2
+#define STMT_ELSE 0x4
+#define STMT_WHILE 0x8
+#define STMT_RETURN 0x10
+#define STMT_VAR_DECL 0x20
+#define STMT_EXPR 0x40
+
+typedef struct Statement {
+	// Token
+	List tokens;
+
+	int flags;
+
+	Variable *var;
+	Expression *expr;
+	List statements;
+} Statement;
+
+typedef struct Function {
+	Type type;
+	char *name;
+
+	List variables;
+
+	// Parameter
+	List params;
+
+	// Statement
+	List statements;
+} Function;
+
+typedef struct Program {
+	/*
+	 * Raw tokens.
+	 */
+	Token **tokenArray;
+	int tokenCount;
+	int i;
+
+	int lineCount;
+
+	// Struct
+	List structs;
+
+	// Variable
+	List vars;
+
+	// Function
+	List functions;
+
+	FILE *outFP;
+} Program;
 
 static char *inFile;
 static char *outFile;
@@ -101,145 +279,6 @@ mainArgs(int argc, char **argv)
 		exit(1);
 	}
 }
-
-/*
- * Delimiters   | ;
- * Whitespace
- * 'string'
- * # comments
- */
-
-/*
-char *symMathBinary[] = {
-	"|","&","^",
-	"||","&&",
-	"+","-","*","/","%",
-	"==","!=","<",">","<=",">=",
-}
-
-char *symMathUnary[] = {
-	"~",
-	"!",
-	"-",
-}
-*/
-
-char *symbols[] = {
-	"|","&","^",
-	"||","&&",
-	"+","-","*","/","%",
-	"==","!=","<",">","<=",">=",
-	"~",
-	"!",
-	"-",
-	"=",
-	".","->",
-	"[","]","(",")",",",
-	"u8","u32","void",
-	"struct",
-	";","{","}",
-	"if","else",
-	"while","for","break","continue",
-	"return"
-};
-#define NUM_SYMBOLS (sizeof(symbols) / sizeof(*symbols))
-
-#define T_TERMINAL    0x1
-#define T_IDENTIFIER  0x2
-#define T_LITERAL_HEX 0x4
-#define T_LITERAL_DEC 0x8
-#define T_LITERAL_STR 0x10
-#define T_LITERAL_CHR 0x20
-#define T_LITERAL (T_LITERAL_HEX | T_LITERAL_DEC | T_LITERAL_STR | T_LITERAL_CHR)
-
-typedef struct Token {
-	char *string;
-	int id;
-	int type;
-	int line;
-	void *private;
-} Token;
-
-typedef struct Struct {
-	char *name;
-	int size;
-
-	// Arg
-	List members;
-} Struct;
-
-#define TYPE_U8 0x1
-#define TYPE_U32 0x2
-#define TYPE_STRUCT 0x4
-#define TYPE_PTR 0x8
-
-/*
- * Arrays are just pointers to a region of memory.
- * This type isn't really necessary.
- * We do need someway to keep track of the array size.
- */
-#define TYPE_ARRAY 0x10
-
-typedef struct Type {
-	Token *token;
-
-	int flags;
-	int size;
-
-	int ptrCount;
-	int arraySize;
-	Struct *structType;
-} Type;
-
-typedef struct Arg {
-	Type type;
-	char *name;
-} Arg;
-
-typedef struct Variable {
-	Type type;
-	char *name;
-	int address;
-	Token *value;
-} Variable;
-
-typedef struct Statement {
-	// Token
-	List tokens;
-} Statement;
-
-typedef struct Function {
-	Type type;
-	char *name;
-
-	// Arg
-	List args;
-
-	// Statement
-	List statements;
-} Function;
-
-typedef struct Program {
-	/*
-	 * Raw tokens.
-	 */
-	Token **tokenArray;
-	int tokenCount;
-	int i;
-
-	int lineCount;
-
-	// Struct
-	List structs;
-
-	// Variable
-	List vars;
-
-	// Function
-	List functions;
-
-	FILE *outFP;
-} Program;
 
 void
 fatal(const char *fmt, ...)
@@ -774,10 +813,21 @@ printType(Type *type, int newline)
 }
 
 static void
-printArg(Arg *arg)
+printParameter(Parameter *param)
 {
-	printType(&arg->type, 0);
-	printf(" %s", arg->name);
+	printType(&param->type, 0);
+	printf(" %s", param->name);
+}
+
+static void
+printGlobalVariable(Variable *var)
+{
+	printType(&var->type, 0);
+	printf(" %s", var->name);
+	if (var->value != NULL) {
+		printf(" = %s", var->value->string);
+	}
+	printf(";\n");
 }
 
 static void
@@ -797,12 +847,56 @@ printStruct(Struct *s)
 	printf("struct %s {\n", s->name);
 	ListEntry *entry = NULL;
 	while (listNext(&s->members, &entry) != NULL) {
-		Arg *arg = entry->data;
-		printArg(arg);
+		Parameter *param = entry->data;
+		printParameter(param);
 
 		printf(";\n");
 	}
 	printf("}\n");
+}
+
+static void
+printExpression(Expression *e)
+{
+	//printf("E: ");
+	ListEntry *entry = NULL;
+	while (listNext(&e->postfix, &entry) != NULL) {
+		Oper *o = entry->data;
+		printf("%s ", o->token->string);
+	}
+}
+
+static void
+printStatement(Statement *s)
+{
+	if (s->flags & STMT_IF) {
+		printf("if (");
+		printExpression(s->expr);
+		printf(") {\n");
+		printf("}\n");
+	} else if (s->flags & STMT_ELIF) {
+		printf("elif (");
+		printExpression(s->expr);
+		printf(") {\n");
+		printf("}\n");
+	} else if (s->flags & STMT_ELSE) {
+		printf("else {\n");
+		printf("}\n");
+	} else if (s->flags & STMT_WHILE) {
+		printf("while (");
+		printExpression(s->expr);
+		printf(") {\n");
+		printf("}\n");
+	} else if (s->flags & STMT_RETURN) {
+		printf("return ");
+		printExpression(s->expr);
+		printf(";\n");
+	} else if (s->flags & STMT_VAR_DECL) {
+		printVariable(s->var);
+	} else if (s->flags & STMT_EXPR) {
+		printExpression(s->expr);
+		printf(";\n");
+	}
 }
 
 static void
@@ -811,11 +905,11 @@ printFunction(Function *f)
 	printf("func %s(", f->name);
 
 	ListEntry *entry = NULL;
-	while (listNext(&f->args, &entry) != NULL) {
-		Arg *arg = entry->data;
-		printArg(arg);
+	while (listNext(&f->params, &entry) != NULL) {
+		Parameter *param = entry->data;
+		printParameter(param);
 
-		if (entry != f->args.tail) {
+		if (entry != f->params.tail) {
 			printf(", ");
 		}
 	}
@@ -827,8 +921,8 @@ printFunction(Function *f)
 
 	entry = NULL;
 	while (listNext(&f->statements, &entry) != NULL) {
-		Token *token = entry->data;
-		printToken(token, 1);
+		Statement *s = entry->data;
+		printStatement(s);
 	}
 
 	printf("}\n");
@@ -970,47 +1064,446 @@ parseType(Program *prog, Type *type, int allowArray)
 }
 
 /*
-typedef struct Arg {
+typedef struct Parameter {
 	Type type;
 	char *name;
-} Arg;
+} Parameter;
 */
 
 /*
- * Parse a single argument. If 'arg' is NULL then a new object will
+ * Parse a single parameter. If 'param' is NULL then a new object will
  * be allocated.
  */
-static Arg *
-parseArg(Program *prog, Arg *arg)
+static Parameter *
+parseParameter(Program *prog, Parameter *param)
 {
-	fprintf(stderr, "Parsing argument.\n");
+	fprintf(stderr, "Parsing parameter.\n");
 
-	if (arg == NULL) {
-		if ((arg = malloc(sizeof(*arg))) == NULL) {
-			fatal("Can't allocate Arg object: %s\n", strerror(errno));
+	if (param == NULL) {
+		if ((param = malloc(sizeof(*param))) == NULL) {
+			fatal("Can't allocate Parameter object: %s\n", strerror(errno));
 		}
 	}
-	memset(arg, 0, sizeof(*arg));
+	memset(param, 0, sizeof(*param));
 
-	parseType(prog, &arg->type, 0);
+	parseType(prog, &param->type, 0);
 
 	Token *token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
 		error(token, "Expected identifier.\n");
 	}
-	arg->name = token->string;
+	param->name = token->string;
 
-	return arg;
+	return param;
 }
 
-#if 0
-static Statement *
-parseStatement(Program *prog, Token *token)
+int
+isOperator(Token *token)
 {
+	int i;
+	for (i = 0; i < NUM_OPERATOR_SYMBOLS; i++) {
+		if (match(token, operatorSymbols[i])) {
+			return 1;
+		}
+	}
 
-	return NULL;
+	return 0;
 }
-#endif
+
+int
+getOperatorInfo(Oper *o)
+{
+	char *p1[] = {"[","]","(",")",".","->",NULL};
+	char *p2[] = {"-","!","~","*","&","@","sizeof",NULL};
+	char *p3[] = {"*","/","%",NULL};
+	char *p4[] = {"+","-",NULL};
+	char *p5[] = {"<<",">>",NULL};
+	char *p6[] = {"<","<=",">",">=",NULL};
+	char *p7[] = {"==","!=",NULL};
+	char *p8[] = {"&",NULL};
+	char *p9[] = {"^",NULL};
+	char *p10[] = {"|",NULL};
+	char *p11[] = {"&&",NULL};
+	char *p12[] = {"||",NULL};
+	char *p13[] = {"=",NULL};
+
+	char **precInfo[] = {
+		p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13
+	};
+
+	int assocInfo[] = {
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_RIGHT_TO_LEFT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_LEFT_TO_RIGHT,
+		ASSOC_RIGHT_TO_LEFT
+	};
+
+	int i, j;
+	for (i = 0; i < sizeof(precInfo) / sizeof(*precInfo); i++) {
+		if (i == 1 && o->isBinary) {
+			/*
+			 * Skip over all unary operators.
+			 */
+			continue;
+		}
+		for (j = 0; precInfo[i][j] != NULL; j++) {
+			if (match(o->token, precInfo[i][j])) {
+				o->precedence = i;
+				o->associativity = assocInfo[i];
+				return 0;
+			}
+		}
+	}
+	return -1;
+}
+
+int
+parseOperator(Expression *expr, Oper *o, Lifo *lifo, int *prevOper)
+{
+	o->flags |= EXPR_OPERATOR;
+	o->isBinary = *prevOper & EXPR_OPERATOR ? 0 : 1;
+	getOperatorInfo(o);
+	*prevOper = EXPR_OPERATOR;
+
+	Oper *other;
+	if (match(o->token, ")")) {
+		/*
+		 * Pop entries from the stack until we find a match parenthesis.
+		 */
+		while ((other = lifoPop(lifo)) != NULL) {
+			if (match(other->token, "(")) {
+				free(other);
+				break;
+			}
+			listAppend(&expr->postfix, other);
+			printf("Append ): %s\n", other->token->string);
+		}
+		return 0;
+	}
+	if (match(o->token, "(")) {
+		lifoPush(lifo, o);
+		return 0;
+	}
+
+CHECK_STACK:
+	if (lifo->head == NULL) {
+		printf("Head NULL\n");
+		lifoPush(lifo, o);
+		return 0;
+	}
+	Oper *top = lifoPeek(lifo);
+	if (match(top->token, "(")) {
+		lifoPush(lifo, o);
+		return 0;
+	}
+	
+	if (o->precedence < top->precedence) {
+		lifoPush(lifo, o);
+		return 0;
+	}
+	if (o->precedence == top->precedence) {
+		if (o->associativity == ASSOC_LEFT_TO_RIGHT) {
+			other = lifoPop(lifo);
+			listAppend(&expr->postfix, other);
+			printf("Append equal: %s\n", other->token->string);
+		}
+		lifoPush(lifo, o);
+		return 0;
+	}
+	if (o->precedence > top->precedence) {
+		other = lifoPop(lifo);
+		listAppend(&expr->postfix, other);
+		printf("Append lower: %s\n", other->token->string);
+		goto CHECK_STACK;
+	}
+
+	abort();
+}
+
+/*
+ * Function call:  <ident> ( [<param>[,<param>[...]]] );
+ * operator
+ * operand
+ */
+static Expression *
+parseExpression(Program *prog, char *sentinel)
+{
+	fprintf(stderr, "Parsing expression.\n");
+
+	Token *token;
+
+	Expression *expr = NULL;
+	if ((expr = malloc(sizeof(*expr))) == NULL) {
+		fatal("Can't allocate Expression object: %s\n", strerror(errno));
+	}
+	memset(expr, 0, sizeof(*expr));
+
+	Lifo *lifo = lifoAlloc();
+	Oper *o = NULL;
+
+	/*
+	 * The end of an expression is one of: ;,)
+	 */
+	int prevOper = EXPR_OPERATOR;
+	int parenStack = 0;
+	while ((token = nextToken(prog, 0)) != NULL) {
+		if (match(token, sentinel) && parenStack <= 0) {
+			prog->i--;
+			break;
+		}
+
+		/*
+		 * New oper object.
+		 */
+		if ((o = malloc(sizeof(*o))) == NULL) {
+			fatal("Can't allocate Oper object: %s\n", strerror(errno));
+		}
+		memset(o, 0, sizeof(*o));
+		o->token = token;
+
+	/*
+	 * 1.	Print operands as they arrive.
+	 *
+	 * 2.	If the stack is empty or contains a left parenthesis on top, push
+	 * the incoming operator onto the stack.
+	 *
+	 * 3.	If the incoming symbol is a left parenthesis, push it on the stack.
+	 *
+	 * 4.	If the incoming symbol is a right parenthesis, pop the stack and
+	 * print the operators until you see a left parenthesis. Discard the pair
+	 * of parentheses.
+	 *
+	 * 5.	If the incoming symbol has higher precedence than the top of the
+	 * stack, push it on the stack.
+	 *
+	 * 6.	If the incoming symbol has equal precedence with the top of the
+	 * stack, use association. If the association is left to right, pop and
+	 * print the top of the stack and then push the incoming operator. If the
+	 * association is right to left, push the incoming operator.
+	 *
+	 * 7.	If the incoming symbol has lower precedence than the symbol on the
+	 * top of the stack, pop the stack and print the top operator. Then test
+	 * the incoming operator against the new top of stack.
+	 *
+	 * 8.	At the end of the expression, pop and print all operators on the
+	 * stack. (No parentheses should remain.)
+	 */
+		fprintf(stderr, "%s\n", token->string);
+		if (isOperator(token)) {
+			parseOperator(expr, o, lifo, &prevOper);
+		} else {
+			/*
+			 * Append operands to the postfix list as they arrive.
+			 */
+			o->flags |= EXPR_OPERAND;
+			prevOper = EXPR_OPERAND;
+			listAppend(&expr->postfix, o);
+			printf("Append rand: %s\n", o->token->string);
+
+			/*
+			 * If the operand is a function name, finish parsing the function
+			 * and it's arguments.
+			 */
+			//TODO
+		}
+
+		if (match(token, "(")) {
+			parenStack++;
+		}
+		if (match(token, ")")) {
+			parenStack--;
+		}
+	}
+
+	/*
+	 * Pop any remaining operators.
+	 */
+	while ((o = lifoPop(lifo)) != NULL) {
+		listAppend(&expr->postfix, o);
+		printf("Append end: %s", o->token->string);
+	}
+
+	lifoFree(&lifo);
+
+	return expr;
+}
+
+static Variable *
+parseVariable(Program *prog)
+{
+	fprintf(stderr, "Parsing variable.\n");
+
+	Token *token = NULL;
+
+	Variable *var = NULL;
+	if ((var = malloc(sizeof(*var))) == NULL) {
+		fatal("Can't allocate var object: %s\n", strerror(errno));
+	}
+	memset(var, 0, sizeof(*var));
+
+	parseType(prog, &var->type, 1);
+
+	token = nextToken(prog, 1);
+	if (token->type != T_IDENTIFIER) {
+		error(token, "Expected variable name.\n");
+	}
+	var->name = token->string;
+
+	token = nextToken(prog, 1);
+	if (match(token, "=")) {
+		/*
+		 * Initialize variable to literal.
+		 */
+		token = nextToken(prog, 1);
+		printf("0x%x\n", token->type);
+		if ((token->type & T_LITERAL) == 0) {
+			error(token, "Variables can only be initialized to literals.\n");
+		}
+		var->value = token;
+		token = nextToken(prog, 1);
+	}
+	
+	if (!match(token, ";")) {
+		error(token, "Expected ;\n");
+	}
+
+	return var;
+}
+
+static Statement *parseStatement(Program *prog);
+
+static int
+parseBlock(Program *prog, Statement *statement, char *name)
+{
+	fprintf(stderr, "Parsing block.\n");
+
+	Token *token;
+
+	token = nextToken(prog, 1);
+	if (!match(token, "{")) {
+		error(token, "After %s, expected {\n", name);
+	}
+
+	while ((token = nextToken(prog, 1)) != NULL) {
+		if (match(token, "}")) {
+			break;
+		}
+		prog->i--;
+
+		Statement *stmt = parseStatement(prog);
+		listAppend(&statement->statements, stmt);
+	}
+
+	return 0;
+}
+
+/*
+ * if ( <expression> ) {
+ *   <statement>
+ *   ...
+ * }
+ */
+static int
+parseConditionalBlock(Program *prog, Statement *statement, char *name)
+{
+	fprintf(stderr, "Parsing conditional block.\n");
+
+	Token *token;
+
+	token = nextToken(prog, 1);
+	if (!match(token, "(")) {
+		error(token, "After %s, expected (\n", name);
+	}
+
+	statement->expr = parseExpression(prog, ")");
+
+	token = nextToken(prog, 1);
+	if (!match(token, ")")) {
+		error(token, "After %s, expected )\n", name);
+	}
+
+	return parseBlock(prog, statement, name);
+}
+
+/*
+ * Variable declaration:
+ * <type> <ident> [ = <expression> ];
+ *
+ * Control flow:
+ * if ( <expression> ) {
+ *   <statement>
+ * }
+ *
+ * Loop:
+ * while ( <expression> ) {
+ *   <statement>
+ * }
+ *
+ * Return statement:
+ * return [<expression>];
+ *
+ * Generic expression that results in some value:
+ * <expression>
+ */
+static Statement *
+parseStatement(Program *prog)
+{
+	fprintf(stderr, "Parsing statement.\n");
+
+	Token *token;
+
+	Statement *statement = NULL;
+	if ((statement = malloc(sizeof(*statement))) == NULL) {
+		fatal("Can't allocate Statement object: %s\n", strerror(errno));
+	}
+	memset(statement, 0, sizeof(*statement));
+
+	token = nextToken(prog, 1);
+	if (match(token, "if")) {
+		statement->flags |= STMT_IF;
+		parseConditionalBlock(prog, statement, "if");
+	} else if (match(token, "elif")) {
+		statement->flags |= STMT_ELIF;
+		parseConditionalBlock(prog, statement, "elif");
+	} else if (match(token, "else")) {
+		statement->flags |= STMT_ELSE;
+		parseBlock(prog, statement, "else");
+	} else if (match(token, "while")) {
+		statement->flags |= STMT_WHILE;
+		parseConditionalBlock(prog, statement, "while");
+	} else if (match(token, "return")) {
+		statement->flags |= STMT_RETURN;
+		statement->expr = parseExpression(prog, ";");
+		token = nextToken(prog, 1);
+		if (!match(token, ";")) {
+			error(token, "After expression, expected ;\n");
+		}
+	} else if (isType(prog, token)) {
+		statement->flags |= STMT_VAR_DECL;
+		prog->i--;
+		statement->var = parseVariable(prog);
+	} else {
+		prog->i--;
+		statement->flags |= STMT_EXPR;
+		statement->expr = parseExpression(prog, ";");
+
+		token = nextToken(prog, 1);
+		if (!match(token, ";")) {
+			error(token, "After expression, expected ;\n");
+		}
+	}
+
+	return statement;
+}
 
 /*
  * func <ident> ( [ <type> <ident> [ , <type> <ident> ] ] ) [ <type> ] { }
@@ -1049,8 +1542,8 @@ parseFunction(Program *prog)
 	token = nextToken(prog, 1);
 	while (!match(token, ")")) {
 		prog->i--;
-		Arg *arg = parseArg(prog, NULL);
-		listAppend(&func->args, arg);
+		Parameter *param = parseParameter(prog, NULL);
+		listAppend(&func->params, param);
 
 		token = nextToken(prog, 1);
 		if (match(token, ",")) {
@@ -1070,9 +1563,19 @@ parseFunction(Program *prog)
 	token = nextToken(prog, 1);
 	if (!match(token, "{")) {
 		error(token, "After function header, expected {\n");
-		abort();
 	}
 
+	while ((token = nextToken(prog, 0)) != NULL) {
+		if (match(token, "}")) {
+			break;
+		}
+		prog->i--;
+
+		Statement *statement = parseStatement(prog);
+		listAppend(&func->statements, statement);
+	}
+
+#if 0
 	int braceStack = 0;
 	while ((token = nextToken(prog, 0)) != NULL) {
 		if (match(token, "{")) {
@@ -1087,14 +1590,15 @@ parseFunction(Program *prog)
 		//TODO: Actually finish parsing the statements in a function.
 		listAppend(&func->statements, token);
 	}
+#endif
 
 	return func;
 }
 
 static Variable *
-parseVariable(Program *prog)
+parseGlobalVariable(Program *prog)
 {
-	fprintf(stderr, "Parsing variable.\n");
+	fprintf(stderr, "Parsing global variable.\n");
 
 	Token *token = NULL;
 
@@ -1160,10 +1664,10 @@ parseStruct(Program *prog)
 	token = nextToken(prog, 1);
 	while (!match(token, "}")) {
 		prog->i--;
-		Arg *arg = parseArg(prog, NULL);
-		listAppend(&s->members, arg);
+		Parameter *param = parseParameter(prog, NULL);
+		listAppend(&s->members, param);
 
-		s->size += arg->type.size;
+		s->size += param->type.size;
 
 		token = nextToken(prog, 1);
 		if (!match(token, ";")) {
@@ -1204,7 +1708,7 @@ parser(Program *prog)
 		}
 		else if (isType(prog, token)) {
 			prog->i--;
-			Variable *var = parseVariable(prog);
+			Variable *var = parseGlobalVariable(prog);
 			listAppend(&prog->vars, var);
 		} else {
 			error(token, "Only 'func', 'struct' and variables are allowed in global scope.\n");
@@ -1339,6 +1843,21 @@ genVariable(Program *prog, Variable *var)
 }
 
 static int
+genFunction(Program *prog, Function *f)
+{
+	/*
+	 * Throw down a label so others can easily call the function.
+	 */
+	fprintf(prog->outFP, ".f_%s\n", f->name);
+
+	/*
+	 * Push any register this function will use onto the stack.
+	 */
+
+	return 0;
+}
+
+static int
 generate(Program *prog)
 {
 	ListEntry *entry = NULL;
@@ -1368,6 +1887,14 @@ generate(Program *prog)
 		genVariable(prog, var);
 	}
 
+	/*
+	 * Generate code for all functions.
+	 */
+	entry = NULL;
+	while (listNext(&prog->functions, &entry) != NULL) {
+		Function *f = entry->data;
+		genFunction(prog, f);
+	}
 	return 0;
 }
 
@@ -1387,7 +1914,7 @@ main(int argc, char **argv)
 	entry = NULL;
 	while (listNext(&prog.vars, &entry) != NULL) {
 		Variable *var = entry->data;
-		printVariable(var);
+		printGlobalVariable(var);
 	}
 
 	entry = NULL;

@@ -34,7 +34,9 @@ func main() u32 {
 	a = 0x10 | foo.foo;
 
 	u8 a = 3;
-	u8 sum = add(foo.foo, a);
+	//u8 sum = add(foo.foo, a);
+	u8 sum;
+	sum = add(foo.foo, a);
 
 	if (a || foo.bar) {
 		return 32;
