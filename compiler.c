@@ -12,40 +12,34 @@
 #include "list.h"
 #include "lifo.h"
 
-char *operatorSymbols[] = {
-	"|","&","^",
-	"||","&&",
-	"+","-","*","/","%",
-	"==","!=","<",">","<=",">=",
-	"~",
-	"!",
-	"-",
+#define OPERATOR_SYMBOLS \
+	"[","]","(",")",".","->", \
+	"-","!","~","*","&","@","sizeof", \
+	"*","/","%", \
+	"+","-", \
+	"<<",">>", \
+	"<","<=",">",">=", \
+	"==","!=", \
+	"&", \
+	"^", \
+	"|", \
+	"&&", \
+	"||", \
 	"=",
-	".","->",
-	"@",
-	"[","]","(",")"
+
+char *operatorSymbols[] = {
+	OPERATOR_SYMBOLS
 };
 #define NUM_OPERATOR_SYMBOLS (sizeof(operatorSymbols) / sizeof(*operatorSymbols))
 
 char *symbols[] = {
-	"|","&","^",
-	"||","&&",
-	"+","-","*","/","%",
-	"==","!=","<",">","<=",">=",
-	"~",
-	"!",
-	"-",
-	"=",
-	".","->",
-	"@",
-	"[","]","(",")",",",
+	OPERATOR_SYMBOLS
 	"u8","u32","void",
 	"struct",
-	";","{","}",
+	",",";","{","}",
 	"if","else",
 	"while","for","break","continue",
 	"return",
-	"sizeof"
 };
 #define NUM_SYMBOLS (sizeof(symbols) / sizeof(*symbols))
 
@@ -108,6 +102,18 @@ typedef struct Variable {
 	Token *value;
 } Variable;
 
+typedef struct Argument {
+	Type type;
+	char *name;
+} Argument;
+
+typedef struct FunctionCall {
+	char *name;
+
+	// Expression
+	List argExprList;
+} FunctionCall;
+
 #define EXPR_OPERATOR 0x1
 #define EXPR_LITERAL 0x2
 #define EXPR_VAR 0x4
@@ -118,12 +124,13 @@ typedef struct Variable {
 #define ASSOC_RIGHT_TO_LEFT 2
 
 /*
- * <operand> := <variable> | <func>
+ * <operand> := <variable> | <fn>
  * <operator> := <math symbol>
  */
 typedef struct Oper {
 	int flags;
 	Token *token;
+	FunctionCall *call;
 
 	int isBinary;
 	int precedence;
@@ -855,6 +862,20 @@ printStruct(Struct *s)
 	printf("}\n");
 }
 
+static void printExpression(Expression *e);
+
+static void
+printFunctionCall(FunctionCall *call)
+{
+	printf("%s(", call->name);
+	ListEntry *entry = NULL;
+	while (listNext(&call->argExprList, &entry) != NULL) {
+		Expression *expr = entry->data;
+		printExpression(expr);
+	}
+	printf(")");
+}
+
 static void
 printExpression(Expression *e)
 {
@@ -862,31 +883,52 @@ printExpression(Expression *e)
 	ListEntry *entry = NULL;
 	while (listNext(&e->postfix, &entry) != NULL) {
 		Oper *o = entry->data;
-		printf("%s ", o->token->string);
+		if (o->flags & EXPR_FUNC) {
+			printFunctionCall(o->call);
+		} else {
+			printf("%s ", o->token->string);
+		}
 	}
+}
+
+static void printStatement(Statement *s);
+
+static void
+printBlock(Statement *s)
+{
+	printf(" {\n");
+	ListEntry *entry = NULL;
+	while (listNext(&s->statements, &entry) != NULL) {
+		Statement *s = entry->data;
+		printStatement(s);
+	}
+	printf("}\n");
+}
+
+static void
+printConditionalBlock(Statement *s)
+{
+	printf("(");
+	printExpression(s->expr);
+	printf(")");
+	printBlock(s);
 }
 
 static void
 printStatement(Statement *s)
 {
 	if (s->flags & STMT_IF) {
-		printf("if (");
-		printExpression(s->expr);
-		printf(") {\n");
-		printf("}\n");
+		printf("if ");
+		printConditionalBlock(s);
 	} else if (s->flags & STMT_ELIF) {
-		printf("elif (");
-		printExpression(s->expr);
-		printf(") {\n");
-		printf("}\n");
+		printf("elif ");
+		printConditionalBlock(s);
 	} else if (s->flags & STMT_ELSE) {
-		printf("else {\n");
-		printf("}\n");
+		printf("else ");
+		printBlock(s);
 	} else if (s->flags & STMT_WHILE) {
-		printf("while (");
-		printExpression(s->expr);
-		printf(") {\n");
-		printf("}\n");
+		printf("while ");
+		printConditionalBlock(s);
 	} else if (s->flags & STMT_RETURN) {
 		printf("return ");
 		printExpression(s->expr);
@@ -902,7 +944,7 @@ printStatement(Statement *s)
 static void
 printFunction(Function *f)
 {
-	printf("func %s(", f->name);
+	printf("fn %s(", f->name);
 
 	ListEntry *entry = NULL;
 	while (listNext(&f->params, &entry) != NULL) {
@@ -928,6 +970,30 @@ printFunction(Function *f)
 	printf("}\n");
 }
 
+static void
+print(Program *prog)
+{
+	ListEntry *entry;
+
+	entry = NULL;
+	while (listNext(&prog->vars, &entry) != NULL) {
+		Variable *var = entry->data;
+		printGlobalVariable(var);
+	}
+
+	entry = NULL;
+	while (listNext(&prog->structs, &entry) != NULL) {
+		Struct *s = entry->data;
+		printStruct(s);
+	}
+
+	entry = NULL;
+	while (listNext(&prog->functions, &entry) != NULL) {
+		Function *f = entry->data;
+		printFunction(f);
+	}
+}
+
 /*
  * == 0 on mismatch
  * != 0 on match
@@ -939,6 +1005,26 @@ match(Token *token, char *string)
 		return 0;
 	}
 	return 1;
+}
+
+/*
+ * == 0 on mismatch
+ * != 0 on match
+ */
+static int
+matchChars(Token *token, char *string)
+{
+	char buf[2];
+	buf[1] = '\0';
+
+	int i;
+	for (i = 0; i < strlen(string); i++) {
+		buf[0] = string[i];
+		if (strcmp(token->string, buf) == 0) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 /*
@@ -1097,6 +1183,53 @@ parseParameter(Program *prog, Parameter *param)
 	return param;
 }
 
+static Expression *parseExpression(Program *prog, char *sentinel);
+
+/*
+ * <ident> ( [ <expression> [ , <expression> ] ] )
+ *
+ * foo(<expression>, <expression>, <expression>)
+ *
+ *  < 0  Error
+ * == 0  Not a function call def
+ *  > 0  Parsed function call def
+ */
+static FunctionCall *
+parseFunctionCall(Program *prog, char *name)
+{
+	fprintf(stderr, "Parsing function call.\n");
+
+	FunctionCall *call = NULL;
+	if ((call = malloc(sizeof(*call))) == NULL) {
+		fatal("Can't allocate FunctionCall object: %s\n", strerror(errno));
+	}
+	memset(call, 0, sizeof(*call));
+
+	call->name = name;
+
+	Token *token = nextToken(prog, 1);
+	if (!match(token, "(")) {
+		error(token, "Expected (\n");
+	}
+
+	token = nextToken(prog, 1);
+	while (!match(token, ")")) {
+		prog->i--;
+		Expression *expr = parseExpression(prog, ",)");
+		listAppend(&call->argExprList, expr);
+
+		token = nextToken(prog, 1);
+		if (match(token, ",")) {
+			/*
+			 * There is another function argument.
+			 */
+			token = nextToken(prog, 1);
+		}
+	}
+
+	return call;
+}
+
 int
 isOperator(Token *token)
 {
@@ -1235,7 +1368,7 @@ CHECK_STACK:
  * operand
  */
 static Expression *
-parseExpression(Program *prog, char *sentinel)
+parseExpression(Program *prog, char *sentinels)
 {
 	fprintf(stderr, "Parsing expression.\n");
 
@@ -1256,7 +1389,7 @@ parseExpression(Program *prog, char *sentinel)
 	int prevOper = EXPR_OPERATOR;
 	int parenStack = 0;
 	while ((token = nextToken(prog, 0)) != NULL) {
-		if (match(token, sentinel) && parenStack <= 0) {
+		if (matchChars(token, sentinels) && parenStack <= 0) {
 			prog->i--;
 			break;
 		}
@@ -1304,16 +1437,27 @@ parseExpression(Program *prog, char *sentinel)
 			/*
 			 * Append operands to the postfix list as they arrive.
 			 */
-			o->flags |= EXPR_OPERAND;
-			prevOper = EXPR_OPERAND;
 			listAppend(&expr->postfix, o);
 			printf("Append rand: %s\n", o->token->string);
+
+			if (o->token->type & T_LITERAL) {
+				o->flags = EXPR_LITERAL;
+			} else {
+				o->flags = EXPR_VAR;
+			}
 
 			/*
 			 * If the operand is a function name, finish parsing the function
 			 * and it's arguments.
 			 */
-			//TODO
+			Token *token = nextToken(prog, 1);
+			prog->i--;
+			if (match(token, "(")) {
+				o->flags = EXPR_FUNC;
+				o->call = parseFunctionCall(prog, o->token->string);
+			}
+
+			prevOper = o->flags;
 		}
 
 		if (match(token, "(")) {
@@ -1329,7 +1473,7 @@ parseExpression(Program *prog, char *sentinel)
 	 */
 	while ((o = lifoPop(lifo)) != NULL) {
 		listAppend(&expr->postfix, o);
-		printf("Append end: %s", o->token->string);
+		printf("Append end: %s\n", o->token->string);
 	}
 
 	lifoFree(&lifo);
@@ -1506,9 +1650,9 @@ parseStatement(Program *prog)
 }
 
 /*
- * func <ident> ( [ <type> <ident> [ , <type> <ident> ] ] ) [ <type> ] { }
+ * fn <ident> ( [ <type> <ident> [ , <type> <ident> ] ] ) [ <type> ] { }
  *
- * func foo(u8 a, u32 b, ptr c) void * { }
+ * fn foo(u8 a, u32 b, ptr c) void * { }
  *
  *  < 0  Error
  * == 0  Not a function def
@@ -1520,19 +1664,18 @@ parseFunction(Program *prog)
 	fprintf(stderr, "Parsing function.\n");
 
 	Token *token = NULL;
-	//int i = prog->i;
 
-	Function *func = NULL;
-	if ((func = malloc(sizeof(*func))) == NULL) {
-		fatal("Can't allocate func object: %s\n", strerror(errno));
+	Function *fn = NULL;
+	if ((fn = malloc(sizeof(*fn))) == NULL) {
+		fatal("Can't allocate Function object: %s\n", strerror(errno));
 	}
-	memset(func, 0, sizeof(*func));
+	memset(fn, 0, sizeof(*fn));
 
 	token = nextToken(prog, 1);
 	if (token->type != T_IDENTIFIER) {
 		error(token, "Expected function name.\n");
 	}
-	func->name = token->string;
+	fn->name = token->string;
 
 	token = nextToken(prog, 1);
 	if (!match(token, "(")) {
@@ -1543,7 +1686,7 @@ parseFunction(Program *prog)
 	while (!match(token, ")")) {
 		prog->i--;
 		Parameter *param = parseParameter(prog, NULL);
-		listAppend(&func->params, param);
+		listAppend(&fn->params, param);
 
 		token = nextToken(prog, 1);
 		if (match(token, ",")) {
@@ -1557,7 +1700,7 @@ parseFunction(Program *prog)
 	token = nextToken(prog, 1);
 	if (!match(token, "{")) {
 		prog->i--;
-		parseType(prog, &func->type, 0);
+		parseType(prog, &fn->type, 0);
 	}
 
 	token = nextToken(prog, 1);
@@ -1572,27 +1715,10 @@ parseFunction(Program *prog)
 		prog->i--;
 
 		Statement *statement = parseStatement(prog);
-		listAppend(&func->statements, statement);
+		listAppend(&fn->statements, statement);
 	}
 
-#if 0
-	int braceStack = 0;
-	while ((token = nextToken(prog, 0)) != NULL) {
-		if (match(token, "{")) {
-			braceStack++;
-		}
-		if (match(token, "}")) {
-			if (braceStack == 0) {
-				break;
-			}
-			braceStack--;
-		}
-		//TODO: Actually finish parsing the statements in a function.
-		listAppend(&func->statements, token);
-	}
-#endif
-
-	return func;
+	return fn;
 }
 
 static Variable *
@@ -1688,7 +1814,7 @@ parser(Program *prog)
 		 * At global scope:
 		 * 
 		 *  Function definition
-		 *    func <type> <ident> ( [ <type> <name> [ , <type> <name> ] ] ) <type> { }
+		 *    fn <type> <ident> ( [ <type> <name> [ , <type> <name> ] ] ) <type> { }
 		 *  Struct definition
 		 *    struct <ident> {
 		 *      <type> <ident>,
@@ -1698,9 +1824,9 @@ parser(Program *prog)
 		 *    <type> <ident> [ = <literal> ];
 		 */
 
-		if (match(token, "func")) {
-			Function *func = parseFunction(prog);
-			listAppend(&prog->functions, func);
+		if (match(token, "fn")) {
+			Function *fn = parseFunction(prog);
+			listAppend(&prog->functions, fn);
 		}
 		else if (match(token, "struct")) {
 			Struct *s = parseStruct(prog);
@@ -1711,7 +1837,7 @@ parser(Program *prog)
 			Variable *var = parseGlobalVariable(prog);
 			listAppend(&prog->vars, var);
 		} else {
-			error(token, "Only 'func', 'struct' and variables are allowed in global scope.\n");
+			error(token, "Only 'fn', 'struct' and variables are allowed in global scope.\n");
 		}
 	}
 
@@ -1843,22 +1969,90 @@ genVariable(Program *prog, Variable *var)
 }
 
 static int
-genFunction(Program *prog, Function *f)
+genExpression(Expression *expr)
 {
-	/*
-	 * Throw down a label so others can easily call the function.
-	 */
-	fprintf(prog->outFP, ".f_%s\n", f->name);
+	Lifo *lifo = lifoAlloc();
 
 	/*
-	 * Push any register this function will use onto the stack.
+	 * Loop over the expression in postfix order.
 	 */
+	ListEntry *entry = NULL;
+	while (listNext(&expr->postfix, &entry) != NULL) {
+		Oper *o = entry->data;
+		if (o->flags & EXPR_OPERAND) {
+			/*
+			 * We push operands onto the stack until we find an operator.
+			 */
+			lifoPush(lifo, o);
+			continue;
+		}
+
+		/*
+		 * We have an operator.
+		 */
+		Oper *operand[2];
+		operand[0] = lifoPop(lifo);
+		if (o->isBinary) {
+			operand[1] = lifoPop(lifo);
+		}
+
+		/*
+		 * Perform the operation.
+		 */
+		if (match(o->token, "+")) {
+			printf("%s + %s",
+					operand[0]->token->string,
+					operand[1]->token->string);
+		}
+
+		/*
+		 * Push result back on the stack.
+		 */
+	}
+
+	lifoFree(&lifo);
 
 	return 0;
 }
 
 static int
-generate(Program *prog)
+genStatement(Program *prog, Function *f, Statement *s)
+{
+	if (s->flags & STMT_IF) {
+	} else if (s->flags & STMT_ELIF) {
+	} else if (s->flags & STMT_ELSE) {
+	} else if (s->flags & STMT_WHILE) {
+	} else if (s->flags & STMT_RETURN) {
+	} else if (s->flags & STMT_VAR_DECL) {
+	} else if (s->flags & STMT_EXPR) {
+		genExpression(s->expr);
+	}
+	return 0;
+}
+
+static int
+genFunction(Program *prog, Function *f)
+{
+	/*
+	 * Throw down a label so others can easily call the function.
+	 */
+	fprintf(prog->outFP, ".fn_%s\n", f->name);
+
+	/*
+	 * Push any register this function will use onto the stack.
+	 */
+	ListEntry *entry = NULL;
+	while (listNext(&f->statements, &entry) != NULL) {
+		Statement *s = entry->data;
+		genStatement(prog, f, s);
+	}
+	//fprintf(prog->outFP, "");
+
+	return 0;
+}
+
+static int
+generator(Program *prog)
 {
 	ListEntry *entry = NULL;
 
@@ -1906,30 +2100,23 @@ main(int argc, char **argv)
 
 	mainArgs(argc, argv);
 
+	int i;
+	printf("Operator Symbols %lu:\n", NUM_OPERATOR_SYMBOLS);
+	for (i = 0; i < NUM_OPERATOR_SYMBOLS; i++) {
+		printf("\"%s\",", operatorSymbols[i]);
+	}
+	printf("\n");
+
+	printf("Symbols %lu:\n", NUM_SYMBOLS);
+	for (i = 0; i < NUM_SYMBOLS; i++) {
+		printf("\"%s\",", symbols[i]);
+	}
+	printf("\n");
+
 	lexer(inFile, &prog);
 	parser(&prog);
-
-	ListEntry *entry;
-
-	entry = NULL;
-	while (listNext(&prog.vars, &entry) != NULL) {
-		Variable *var = entry->data;
-		printGlobalVariable(var);
-	}
-
-	entry = NULL;
-	while (listNext(&prog.structs, &entry) != NULL) {
-		Struct *s = entry->data;
-		printStruct(s);
-	}
-
-	entry = NULL;
-	while (listNext(&prog.functions, &entry) != NULL) {
-		Function *f = entry->data;
-		printFunction(f);
-	}
-
-	generate(&prog);
+	print(&prog);
+	generator(&prog);
 
 	return 0;
 }

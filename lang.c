@@ -19,13 +19,13 @@ Foo bob;
  * Add things.
  * Return something.
  */
-func add(u8 a, u8 *b) u8 {
+fn add(u8 a, u8 *b) u8 {
 	b[2] = 42;
 	return a + *b;
 }
 
 // Bob
-func main() u32 {
+fn main() u32 {
 	Foo foo;
 
 	foo.foo = 0x42; // The answer.
